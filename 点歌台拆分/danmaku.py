@@ -59,11 +59,17 @@ async def process_one_request(req, app_instance):
     song_mid, real_name, singer_name, flac_size = found
     display_name = f"{real_name} {singer_name}"
 
-    # 需求2·本地优先：缓存任意档命中 → 就绪，不下载
+    # 需求2·本地优先：缓存任意档命中 → 就绪，不下载（熔断期间同样可用）
     if musiclib.find_any_cached_file(song_mid):
         state.playlist.append({"name": real_name, "display_name": display_name, "mid": song_mid, "requester": uname})
         app_instance.log(f"✅ 就绪[本地缓存]: {display_name}-{uname}")
         return "cached"
+
+    # 第5步·配额闸门：冷却中/达当日上限 → 不再发起下载（失败快、不入列）
+    blocked = musiclib.quota_block_reason()
+    if blocked:
+        app_instance.log(f"⏸ 《{display_name}》暂不处理（{blocked}）→ 不入列 (请求人:{uname})")
+        return "quota_blocked"
 
     # 需求1：下载成功才入列
     app_instance.log(f"⏬ 开始处理下载: {display_name}-{uname}")
@@ -76,10 +82,14 @@ async def process_one_request(req, app_instance):
     reason = getattr(app_instance, "last_download_reason", None)
 
     if file_path:
+        musiclib.quota_note_success()   # 第5步：真实下载 +1，连败清零
         state.playlist.append({"name": real_name, "display_name": display_name, "mid": song_mid, "requester": uname})
         app_instance.log(f"✅ 就绪[下载完成]: {display_name}-{uname}")
         return "downloaded"
     # 失败：不入列（需求1）+ 单行结论（需求9/17.4）
+    tripped = musiclib.quota_note_failure(reason)   # 第5步：配额类失败计连败，达阈值拉闸
+    if tripped:
+        app_instance.log(f"🚨 {tripped}")
     why = {
         "quota": "配额/风控限制，建议稍后再试",
         "device_limited": "播放设备受限，请重新扫码登录QQ音乐",

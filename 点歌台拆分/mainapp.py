@@ -496,6 +496,7 @@ class MusicApp:
         
         runner = web.AppRunner(web_app); await runner.setup(); site = web.TCPSite(runner, '127.0.0.1', 8080); await site.start()
         self.log("✅ OBS 网页服务器已启动")
+        musiclib.load_quota_state()   # 第5步：跨重启恢复当日配额记账（跨日自动归零）
         self.init_audio_engine()
 
         asyncio.create_task(self.music_player_worker()); asyncio.create_task(self.system_media_worker()); asyncio.create_task(self.lyric_sync_worker())

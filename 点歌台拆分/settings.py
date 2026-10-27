@@ -96,6 +96,12 @@ def normalize_quality_key(q):
     """旧配置值归一：flac/master/hires（无损诉求）→ flac；mp3_320/mp3_128/未知 → default。"""
     return "flac" if q in ("flac", "master", "hires") else "default"
 
+# ── 配额保护（第5步，23:49 拍板：5 首 / 10 分钟 / 150）──────────────
+QUOTA_DAILY_CAP = 150         # 每自然日主动下载上限（上游实测约190撞墙，留余量）
+QUOTA_FAIL_STREAK = 5         # 连续几首"疑似配额类"失败 → 熔断
+QUOTA_COOLDOWN_SEC = 600      # 熔断冷却（10分钟）；冷却只挡下载，缓存命中不受影响
+SONG_DOWNLOAD_BUDGET_SEC = 45 # 第7步：单首总时间预算（两档链下 30~45 拍板取上限）
+
 def get_default_browser_path():
     """探测本机 Edge / Chrome 的安装路径，返回 (类型, 路径) 或 None。
     用于打包成 exe 后在他人电脑上显式告诉 Selenium 浏览器位置，避免无限报

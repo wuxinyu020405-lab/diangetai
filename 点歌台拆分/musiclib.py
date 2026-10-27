@@ -403,3 +403,82 @@ async def try_refresh_credential(credential):
             return res
     except Exception:
         return None
+
+
+# ── 第5步：配额记账（下载侧防"撞墙后继续撞"，参数见 settings 常量） ──
+import json as _json
+import time as _time
+
+QUOTA_FILE = os.path.join(settings.BASE_DIR, "quota_state.json")
+
+# 疑似配额/权限类失败（撞墙特征）；网络类(all_failed/retry)不算，避免误伤
+_QUOTA_LIKE_FAILS = {"quota", "device_limited", "no_credential"}
+
+
+def load_quota_state():
+    """把磁盘上的记账读回 state.quota_state；跨日自动归零。损坏文件容忍。"""
+    st = state.quota_state
+    try:
+        if os.path.exists(QUOTA_FILE):
+            with open(QUOTA_FILE, "r", encoding="utf-8") as f:
+                saved = _json.load(f)
+            for k in ("date", "downloaded", "fail_streak", "cooldown_until"):
+                if k in saved:
+                    st[k] = saved[k]
+    except Exception:
+        pass
+    today = _time.strftime("%Y-%m-%d")
+    if st.get("date") != today:      # 跨自然日：下载数与连败数归零（冷却也清）
+        st["date"] = today
+        st["downloaded"] = 0
+        st["fail_streak"] = 0
+        st["cooldown_until"] = 0.0
+    return st
+
+
+def save_quota_state():
+    try:
+        with open(QUOTA_FILE, "w", encoding="utf-8") as f:
+            _json.dump(state.quota_state, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[WARN] 配额记账保存失败: {e}")
+
+
+def quota_block_reason(now=None):
+    """返回阻止本次下载的字符串原因；None=放行。只约束下载，不约束缓存播放。"""
+    st = state.quota_state
+    now = _time.time() if now is None else now
+    if now < st.get("cooldown_until", 0.0):
+        left = int(st["cooldown_until"] - now)
+        return f"熔断冷却中(剩{left // 60}分{left % 60}秒)"
+    if st.get("downloaded", 0) >= settings.QUOTA_DAILY_CAP:
+        return f"今日已达下载上限({settings.QUOTA_DAILY_CAP}首)"
+    return None
+
+
+def quota_note_success():
+    """下载成功：计数 +1（按实际发生下载算，缓存命中不调这里），连败清零。"""
+    st = state.quota_state
+    st["downloaded"] = st.get("downloaded", 0) + 1
+    st["fail_streak"] = 0
+    save_quota_state()
+
+
+def quota_note_failure(reason):
+    """一首的最终结论入账。返回触发熔断的描述(供日志)，未触发返回 None。
+    仅 _QUOTA_LIKE_FAILS 计入连败；普通下载失败(如某首没版权)不推向熔断，
+    避免一首冷门歌拖死整条队列。"""
+    st = state.quota_state
+    if reason in _QUOTA_LIKE_FAILS:
+        st["fail_streak"] = st.get("fail_streak", 0) + 1
+        if st["fail_streak"] >= settings.QUOTA_FAIL_STREAK:
+            st["cooldown_until"] = _time.time() + settings.QUOTA_COOLDOWN_SEC
+            st["fail_streak"] = 0
+            save_quota_state()
+            mins = settings.QUOTA_COOLDOWN_SEC // 60
+            return (f"连续{settings.QUOTA_FAIL_STREAK}首配额类失败"
+                    f"，下载熔断{mins}分钟（缓存中的歌仍可播放）")
+    else:
+        st["fail_streak"] = 0
+    save_quota_state()
+    return None
