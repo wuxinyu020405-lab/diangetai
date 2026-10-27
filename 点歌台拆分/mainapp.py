@@ -81,10 +81,48 @@ class MusicApp:
             if pos_ms >= 0: return pos_ms / 1000.0
         return max(0.0, time.time() - state.active_song_start_ts)
 
+    def get_volume(self):
+        """第6步·高价值2：音量 0~1，脏值回落 1.0（=现状行为）。"""
+        try:
+            v = float(state.style_config.get("global", {}).get("volume", 1.0))
+        except Exception:
+            return 1.0
+        return min(1.0, max(0.0, v))
+
+    def apply_volume(self, slider_val=None):
+        # slider_val 非空 = 滑杆拖动：用它换算并持久化；
+        # 为空 = 起播兜底：读已存配置，只施加不写盘。
+        # （tk.Scale 的 command 回调参数才是当前滑杆值，不能去读尚未更新的 style_config）
+        if slider_val is not None:
+            try:
+                v = min(1.0, max(0.0, int(slider_val) / 100.0))
+            except Exception:
+                v = self.get_volume()
+            state.style_config.setdefault("global", {})["volume"] = v
+            self.schedule_save_style()
+            try:
+                self.lbl_volume_pct.config(text=f"{int(round(v * 100))}%")
+            except Exception:
+                pass
+        else:
+            v = self.get_volume()
+        try:
+            if self.audio_backend == "pygame" and pygame.mixer.get_init():
+                pygame.mixer.music.set_volume(v)
+        except Exception as e:
+            print(f"[WARN] 设置音量失败: {e}")
+        return v
+
     async def player_load_and_play(self, file_path):
         def _pg_start():
             try:
                 pygame.mixer.music.load(file_path)
+                # 第6步：load 会把音量重置回满格，必须起播前重新施加设置值
+                try:
+                    v = self.get_volume()
+                    pygame.mixer.music.set_volume(v)
+                except Exception as e:
+                    print(f"[WARN] 设置音量失败: {e}")
                 pygame.mixer.music.play()
                 return True
             except Exception as e:
@@ -183,6 +221,16 @@ class MusicApp:
         self.combo_quality_top.bind("<<ComboboxSelected>>", self.update_audio_quality)
         self.combo_quality_top.grid(row=0, column=1, sticky="w")
 
+        # 第6步·高价值2：点歌播放音量（作用于 pygame，实时生效并持久化）
+        tk.Label(quality_group, text="点歌音量:", bg="#f0f0f0").grid(row=1, column=0, padx=10, pady=8, sticky="e")
+        _vrow = tk.Frame(quality_group, bg="#f0f0f0"); _vrow.grid(row=1, column=1, sticky="w")
+        self.scale_volume = tk.Scale(_vrow, from_=0, to=100, orient=tk.HORIZONTAL, length=180, showvalue=True,
+                                     bg="#f0f0f0", command=lambda e: self.apply_volume(slider_val=e))
+        self.scale_volume.set(int(round(self.get_volume() * 100)))
+        self.scale_volume.pack(side=tk.LEFT)
+        self.lbl_volume_pct = tk.Label(_vrow, text=f"{int(round(self.get_volume() * 100))}%", bg="#f0f0f0", width=5)
+        self.lbl_volume_pct.pack(side=tk.LEFT, padx=4)
+
         path_group = tk.LabelFrame(basic_inner, text="本地客户端路径", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
         path_group.pack(fill=tk.X, pady=5)
         tk.Label(path_group, text="QQ音乐路径:", bg="#f0f0f0").pack(side=tk.LEFT, padx=10, pady=10)
@@ -240,6 +288,9 @@ class MusicApp:
         scale_sp.set(state.style_config['mixed']['size_playing'])
         scale_sp.pack(side=tk.LEFT, padx=2)
         tk.Checkbutton(f1, text="加粗", variable=self.var_mix_bp, command=lambda: self.update_mixed("bold_playing", self.var_mix_bp.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        # 第6步·修16.3-②：综合挂件此前硬编码前缀，此勾选框真正控制 show_prefix
+        self.var_mix_pfx = tk.BooleanVar(value=state.style_config['mixed'].get("show_prefix", True))
+        tk.Checkbutton(f1, text="显示前缀", variable=self.var_mix_pfx, command=lambda: self.update_mixed("show_prefix", self.var_mix_pfx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
 
         tk.Label(mixed_inner, text="--- 实时歌词样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
         f2 = tk.Frame(mixed_inner, bg="#f0f0f0"); f2.pack(fill=tk.X, pady=2)
@@ -261,6 +312,12 @@ class MusicApp:
         eff_mix.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("effect_lyric", {"高清平滑滚动":"apple_hd", "苹果景深滚动":"apple_blur", "无滚动 (静态)":"static"}[eff_mix.get()]))
         eff_mix.pack(side=tk.LEFT, padx=2)
         tk.Checkbutton(f2, text="加粗", variable=self.var_mix_bl, command=lambda: self.update_mixed("bold_lyric", self.var_mix_bl.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        # 第6步·修16.3-③：综合挂件对齐独立设置（不再借用纯歌词页）
+        self.combo_mix_align = ttk.Combobox(f2, values=["居中", "左", "右"], state="readonly", width=6)
+        _malign = {"center": "居中", "left": "左", "right": "右"}.get(state.style_config['mixed'].get("align", "center"), "居中")
+        self.combo_mix_align.set(_malign)
+        self.combo_mix_align.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("align", {"居中": "center", "左": "left", "右": "right"}[self.combo_mix_align.get()]))
+        self.combo_mix_align.pack(side=tk.LEFT, padx=2)
 
         tk.Label(mixed_inner, text="--- 点歌列表样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
         f3 = tk.Frame(mixed_inner, bg="#f0f0f0"); f3.pack(fill=tk.X, pady=2)
@@ -277,9 +334,32 @@ class MusicApp:
         scale_sq.set(state.style_config['mixed']['size_queue'])
         scale_sq.pack(side=tk.LEFT, padx=2)
         tk.Checkbutton(f3, text="加粗", variable=self.var_mix_bq, command=lambda: self.update_mixed("bold_queue", self.var_mix_bq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        # 第6步·高价值3/5/6：综合挂件队列的条数上限/序号/请求者
+        f3b = tk.Frame(mixed_inner, bg="#f0f0f0"); f3b.pack(fill=tk.X, pady=2)
+        tk.Label(f3b, text="最多显示条数(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
+        self.spin_mix_items = tk.Spinbox(f3b, from_=0, to=100, width=5,
+                                         command=lambda: self.update_mixed("max_items", self._spin_int_or(self.spin_mix_items, 0)))
+        self.spin_mix_items.delete(0, tk.END); self.spin_mix_items.insert(0, str(state.style_config['mixed'].get("max_items", 0)))
+        self.spin_mix_items.bind("<KeyRelease>", lambda e: self.update_mixed("max_items", self._spin_int_or(self.spin_mix_items, 0)))
+        self.spin_mix_items.pack(side=tk.LEFT, padx=2)
+        self.var_mix_sidx = tk.BooleanVar(value=state.style_config['mixed'].get("show_index", True))
+        tk.Checkbutton(f3b, text="序号", variable=self.var_mix_sidx, command=lambda: self.update_mixed("show_index", self.var_mix_sidx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        self.var_mix_sreq = tk.BooleanVar(value=state.style_config['mixed'].get("show_requester", True))
+        tk.Checkbutton(f3b, text="请求者", variable=self.var_mix_sreq, command=lambda: self.update_mixed("show_requester", self.var_mix_sreq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        tk.Label(f3b, text="请求者分隔符:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
+        self.entry_mix_sep = tk.Entry(f3b, width=5, font=("微软雅黑", 9))
+        self.entry_mix_sep.insert(0, state.style_config['mixed'].get("requester_sep", "-"))
+        self.entry_mix_sep.bind("<KeyRelease>", lambda e: self.update_mixed("requester_sep", self.entry_mix_sep.get() or "-"))
+        self.entry_mix_sep.pack(side=tk.LEFT)
+        tk.Label(f3b, text="行最长(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
+        self.spin_mix_chars = tk.Spinbox(f3b, from_=0, to=120, width=5,
+                                         command=lambda: self.update_mixed("max_chars", self._spin_int_or(self.spin_mix_chars, 0)))
+        self.spin_mix_chars.delete(0, tk.END); self.spin_mix_chars.insert(0, str(state.style_config['mixed'].get("max_chars", 0)))
+        self.spin_mix_chars.bind("<KeyRelease>", lambda e: self.update_mixed("max_chars", self._spin_int_or(self.spin_mix_chars, 0)))
+        self.spin_mix_chars.pack(side=tk.LEFT, padx=2)
 
         # ==========================================
-        # Tab 5: 纯歌词源设置（已同步完整对齐参数与动效控制，移除了透明度配置）
+        # Tab 5: 纯歌词源设置（含对齐/动效/透明度 T-A；透明度同时作用于综合挂件歌词区）
         # ==========================================
         tab_lyric = tk.Frame(notebook, bg="#f0f0f0")
         notebook.add(tab_lyric, text="🎤 纯歌词源")
@@ -335,6 +415,14 @@ class MusicApp:
 
         self.var_lyric_bold = tk.BooleanVar(value=state.style_config['lyric']['is_bold'])
         tk.Checkbutton(lyric_inner, text="字体加粗", variable=self.var_lyric_bold, command=lambda: self.update_lyric("is_bold", self.var_lyric_bold.get()), bg="#f0f0f0").grid(row=8, column=1, sticky="w", pady=5)
+
+        # 第6步·高价值1：歌词整体透明度（T-A 等比缩放：只改变整体明暗，滚动层次保留；
+        # 纯歌词页与综合挂件共用本值）
+        tk.Label(lyric_inner, text="歌词透明度:", bg="#f0f0f0").grid(row=9, column=0, padx=5, sticky="e")
+        self.scale_lyric_op = tk.Scale(lyric_inner, from_=10, to=100, orient=tk.HORIZONTAL,
+                                       command=lambda e: self.update_lyric("opacity", int(e) / 100.0))
+        self.scale_lyric_op.set(int(round(state.style_config['lyric'].get("opacity", 1.0) * 100)))
+        self.scale_lyric_op.grid(row=9, column=1, sticky="w")
 
         # ==========================================
         # Tab 6: 正在播放源设置
@@ -398,6 +486,24 @@ class MusicApp:
         self.var_queue_bold = tk.BooleanVar(value=state.style_config['queue']['is_bold'])
         tk.Checkbutton(queue_inner, text="字体加粗", variable=self.var_queue_bold, command=lambda: self.update_queue("is_bold", self.var_queue_bold.get()), bg="#f0f0f0").grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
 
+        # 第6步·高价值3/5/6（点歌列表页一份）
+        qrow = tk.Frame(queue_inner, bg="#f0f0f0"); qrow.grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
+        tk.Label(qrow, text="最多显示条数(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
+        self.spin_q_items = tk.Spinbox(qrow, from_=0, to=100, width=5,
+                                       command=lambda: self.update_queue("max_items", self._spin_int_or(self.spin_q_items, 0)))
+        self.spin_q_items.delete(0, tk.END); self.spin_q_items.insert(0, str(state.style_config['queue'].get("max_items", 0)))
+        self.spin_q_items.bind("<KeyRelease>", lambda e: self.update_queue("max_items", self._spin_int_or(self.spin_q_items, 0)))
+        self.spin_q_items.pack(side=tk.LEFT, padx=2)
+        self.var_q_sidx = tk.BooleanVar(value=state.style_config['queue'].get("show_index", True))
+        tk.Checkbutton(qrow, text="序号", variable=self.var_q_sidx, command=lambda: self.update_queue("show_index", self.var_q_sidx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        self.var_q_sreq = tk.BooleanVar(value=state.style_config['queue'].get("show_requester", True))
+        tk.Checkbutton(qrow, text="请求者", variable=self.var_q_sreq, command=lambda: self.update_queue("show_requester", self.var_q_sreq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        tk.Label(qrow, text="分隔符:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
+        self.entry_q_sep = tk.Entry(qrow, width=5, font=("微软雅黑", 9))
+        self.entry_q_sep.insert(0, state.style_config['queue'].get("requester_sep", "-"))
+        self.entry_q_sep.bind("<KeyRelease>", lambda e: self.update_queue("requester_sep", self.entry_q_sep.get() or "-"))
+        self.entry_q_sep.pack(side=tk.LEFT)
+
         self.update_account_status()
         
         bottom_frame = tk.Frame(self.root, bg="#e0e0e0", pady=5)
@@ -410,6 +516,14 @@ class MusicApp:
     def update_lyric(self, key, val): state.style_config["lyric"][key] = val; self.schedule_save_style()
     def update_playing(self, key, val): state.style_config["playing"][key] = val; self.schedule_save_style()
     def update_queue(self, key, val): state.style_config["queue"][key] = val; self.schedule_save_style()
+
+    def _spin_int_or(self, widget, default):
+        """Spinbox 取整：非数字/负数回落到 default，避免打字中途把配置写坏。"""
+        try:
+            v = int(str(widget.get()).strip())
+            return v if v >= 0 else default
+        except Exception:
+            return default
 
     def update_lyric_align(self, event):
         val = self.combo_lyric_align.get()

@@ -26,19 +26,25 @@ lyric_cache = {}
 
 qq_credential = None 
 
-# 👇 整合部署后的完整独立配置结构（包含纯歌词对齐方式，移除了透明度配置）
+# 👇 完整独立配置结构（含歌词对齐与第6步恢复的歌词透明度 lyric.opacity）
 style_config = {
     "mixed": {
         "show_playing": True, "show_queue": True, "show_lyric": True,
         "font_playing": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_playing": "#00FFFF", "size_playing": 32, "bold_playing": False,
         "font_lyric": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_lyric": "#FFE600", "size_lyric": 28, "effect_lyric": "apple_hd", "bold_lyric": False,
-        "font_queue": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_queue": "#FFFFFF", "size_queue": 36, "bold_queue": False
+        "font_queue": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_queue": "#FFFFFF", "size_queue": 36, "bold_queue": False,
+        # ── 第6步：综合挂件独立成一套（修 16.3 三个失效项 + 高价值3/5/6）──
+        "show_prefix": True, "max_chars": 0,        # 16.3-①②：0=不截断(=现状)
+        "align": "center", "lines_prev": 2, "lines_next": 2,   # 16.3-③：不再寄生 lyric
+        "max_items": 0,                            # 高价值3：0=不限(=现状)
+        "show_index": True, "show_requester": True, "requester_sep": "-"   # 高价值5/6
     },
     "lyric": {
         "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
         "color": "#FFE600", "size": 28, "align": "center",
         "effect": "apple_hd", "lines_prev": 2, "lines_next": 2,
-        "pure_text": "纯音乐, 请欣赏..", "is_bold": False
+        "pure_text": "纯音乐, 请欣赏..", "is_bold": False,
+        "opacity": 1.0                # 第6步·高价值1：T-A 系数，纯歌词与综合挂件共用
     },
     "playing": {
         "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
@@ -46,8 +52,11 @@ style_config = {
     },
     "queue": {
         "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
-        "color": "#FFFFFF", "size": 36, "max_chars": 30, "is_bold": False
+        "color": "#FFFFFF", "size": 36, "max_chars": 30, "is_bold": False,
+        "max_items": 0, "show_index": True,
+        "show_requester": True, "requester_sep": "-"
     },
+    "global": {"volume": 1.0},         # 第6步·高价值2：点歌播放音量（pygame）
     "audio_quality": "flac",
     "max_cache_files": 100,
     "max_cache_size_mb": 500

@@ -59,7 +59,7 @@ def merge_config(old_cfg, new_cfg):
         new_cfg["queue"]["size"] = old_cfg.get("list_font_size", 36)
         new_cfg["mixed"]["size_queue"] = old_cfg.get("list_font_size", 36)
     
-    for section in ["mixed", "lyric", "playing", "queue"]:
+    for section in ["mixed", "lyric", "playing", "queue", "global"]:
         if section in old_cfg and isinstance(old_cfg[section], dict):
             new_cfg[section].update(old_cfg[section])
             

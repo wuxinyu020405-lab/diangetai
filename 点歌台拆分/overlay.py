@@ -42,13 +42,13 @@ li {font-family: var(--font-list); margin-bottom: 10px; text-shadow: 1px 1px 2px
     color: var(--lyric-color);
     text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
     padding: 4px 0;
-    opacity: 0.5;
+    opacity: var(--lyric-op-base, 0.5);
     min-height: 1.2em;
     line-height: 1.4;
 }
 .lyric-line.active {
     font-weight: bold;
-    opacity: 1;
+    opacity: var(--lyric-op-active, 1);
 }
 
 /* 独立纯歌词模式 */
@@ -78,7 +78,7 @@ body[data-lyric-effect="static"] .lyric-box {
 body[data-lyric-effect="static"] .lyric-line {
     font-size: calc(var(--lyric-font-size) * 1.15);
     padding: 4px 0;
-    opacity: 0.5;
+    opacity: var(--lyric-op-base, 0.5);
     filter: none;
     transform: none;
     transition: none;
@@ -86,7 +86,7 @@ body[data-lyric-effect="static"] .lyric-line {
 }
 body[data-lyric-effect="static"] .lyric-line.active {
     font-weight: bold;
-    opacity: 1;
+    opacity: var(--lyric-op-active, 1);
     text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
 }
 
@@ -208,6 +208,15 @@ let currentSongSignature = '';
 let lastActiveIdx = -1; 
 let lastLayoutKey = ''; 
 let lastEffectMode = '';
+let lyricOpK = 1;   // 第6步·透明度T-A系数（0~1），由 applyLyricOpacity 统一设置
+
+function applyLyricOpacity(k, container) {
+    // 滚动模式：JS 用 lyricOpK 乘各行相对透明度
+    // 静态模式：CSS 变量 --lyric-op-base/--lyric-op-active（0.5*k / 1*k，兜底=旧值）
+    lyricOpK = (typeof k === 'number' && k >= 0 && k <= 1) ? k : 1;
+    container.style.setProperty('--lyric-op-base', String(0.5 * lyricOpK));
+    container.style.setProperty('--lyric-op-active', String(1 * lyricOpK));
+}
 
 function updateStaticLyric(lines, align) {
     const container = document.getElementById('lyric-container');
@@ -267,7 +276,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
 
     const prevCount = (style.lines_prev !== undefined) ? style.lines_prev : 2; 
     const nextCount = (style.lines_next !== undefined) ? style.lines_next : 2;
-    const layoutKey = `${effectMode}_${activeIdx}_${prevCount}_${nextCount}_${style.size}_${style.align}_${style.is_bold}_${window.innerHeight}_${window.innerWidth}`;
+    const layoutKey = `${effectMode}_${activeIdx}_${prevCount}_${nextCount}_${style.size}_${style.align}_${style.is_bold}_${lyricOpK}_${window.innerHeight}_${window.innerWidth}`;   // 第6步：含透明度系数，滑杆即时生效
 
     if (!isNewSong && !isEffectChanged && layoutKey === lastLayoutKey) { 
         return; 
@@ -286,6 +295,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
     const minVis = clampedIdx - prevCount; 
     const maxVis = clampedIdx + nextCount;
     const isHD = (effectMode === 'apple_hd');
+    const opK = lyricOpK;   // 第6步·透明度T-A：本帧统一用同一系数
 
     for (let i = 0; i < total; i++) {
         const el = children[i]; 
@@ -301,7 +311,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
 
         if (i === clampedIdx) { 
             el.className = 'lyric-line active'; 
-            el.style.opacity = '1'; 
+            el.style.opacity = String(1 * opK);   // 第6步·透明度T-A：系数等比缩放
             el.style.pointerEvents = 'auto';
             if (isHD) {
                 el.style.filter = 'none';
@@ -318,7 +328,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
                 if (absDist === 2) opacity = 0.52;
                 else if (absDist === 3) opacity = 0.36;
                 else if (absDist >= 4) opacity = 0.24;
-                el.style.opacity = String(opacity);
+                el.style.opacity = String(opacity * opK);
                 el.style.filter = 'none';
                 el.style.transform = 'translateY(0px)';
             } else {
@@ -327,7 +337,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
                 else if (absDist === 3) opacity = 0.22;
                 else if (absDist >= 4) opacity = 0.14;
                 const blurPx = Math.min(absDist * 0.85, 3.6).toFixed(2);
-                el.style.opacity = String(opacity);
+                el.style.opacity = String(opacity * opK);
                 el.style.filter = `blur(${blurPx}px)`;
                 el.style.transform = 'scale(0.96) translateY(0px)';
             }
@@ -390,7 +400,8 @@ async function updateData() {
             sys.style.color = cfg.mixed.color_playing;
             sys.style.fontWeight = cfg.mixed.bold_playing ? 'bold' : 'normal';
             sys.classList.toggle('hidden', !cfg.mixed.show_playing);
-            const sysText = (data.system_playing && data.system_playing !== "暂无播放") ? ('🎵 正在播放: ' + data.system_playing) : '🎵 正在播放: 暂无';
+            const mixPfx = (cfg.mixed.show_prefix === false) ? '' : '🎵 正在播放: ';   // 第6步·修16.3-②
+            const sysText = (data.system_playing && data.system_playing !== "暂无播放") ? (mixPfx + data.system_playing) : (mixPfx + '暂无');
             sys.innerText = sysText;
             
             const ul = document.getElementById('queue-list');
@@ -398,13 +409,21 @@ async function updateData() {
             ul.style.color = cfg.mixed.color_queue;
             ul.style.fontWeight = cfg.mixed.bold_queue ? 'bold' : 'normal';
             ul.classList.toggle('hidden', !cfg.mixed.show_queue);
-            if (data.list.length === 0) {
+            // 第6步·高价值3/5/6：条数上限/序号/请求者 可配（默认=旧行为：全部显示、带序号、sep='-'）
+            const mItems = (cfg.mixed.max_items && cfg.mixed.max_items > 0) ? data.list.slice(0, cfg.mixed.max_items) : data.list;
+            if (mItems.length === 0) {
                 ul.innerHTML = '<li class="empty">队列空闲中...</li>';
             } else {
                 let html = '';
-                data.list.forEach((item, index) => {
-                    let reqStr = item.requester ? `-${item.requester}` : '';
-                    html += `<li>${index + 1}. ${item.display_name}${reqStr}</li>`;
+                const mIdx = cfg.mixed.show_index !== false;
+                const mReq = cfg.mixed.show_requester !== false;
+                const mSep = (cfg.mixed.requester_sep !== undefined) ? cfg.mixed.requester_sep : '-';
+                const mMax = cfg.mixed.max_chars || 0;
+                mItems.forEach((item, index) => {
+                    let reqStr = (mReq && item.requester) ? (mSep + item.requester) : '';
+                    let s = (mIdx ? `${index + 1}. ` : '') + item.display_name + reqStr;
+                    if (mMax > 0 && s.length > mMax) s = s.substring(0, mMax) + '...';   // 第6步·修16.3-①
+                    html += `<li>${s}</li>`;
                 });
                 ul.innerHTML = html;
             }
@@ -413,13 +432,17 @@ async function updateData() {
             lc.style.setProperty('--lyric-font-size', cfg.mixed.size_lyric + 'px');
             lc.style.setProperty('--lyric-color', cfg.mixed.color_lyric);
             lc.style.setProperty('--lyric-font-weight', cfg.mixed.bold_lyric ? 'bold' : 'normal');
+            applyLyricOpacity(cfg.lyric.opacity, lc);   // 第6步·透明度（与纯歌词共用 lyric.opacity）
             
             if (cfg.mixed.show_lyric) {
                 lc.classList.remove('hidden-lyric');
                 document.body.setAttribute('data-lyric-effect', cfg.mixed.effect_lyric);
-                const mixedStyle = { size: cfg.mixed.size_lyric, lines_prev: cfg.lyric.lines_prev, lines_next: cfg.lyric.lines_next, align: cfg.lyric.align || 'center' };
-                if (cfg.mixed.effect_lyric === 'static') updateStaticLyric(data.lyric.lines, cfg.lyric.align || 'center');
-                else updateAppleMusicScroll(data.lyric.all_lines, data.lyric.active_idx, mixedStyle, cfg.mixed.effect_lyric, cfg.lyric.align || 'center');
+                const mAlign = cfg.mixed.align || cfg.lyric.align || 'center';           // 第6步·修16.3-③
+                const mPrev = (cfg.mixed.lines_prev !== undefined) ? cfg.mixed.lines_prev : cfg.lyric.lines_prev;
+                const mNext = (cfg.mixed.lines_next !== undefined) ? cfg.mixed.lines_next : cfg.lyric.lines_next;
+                const mixedStyle = { size: cfg.mixed.size_lyric, lines_prev: mPrev, lines_next: mNext, align: mAlign };
+                if (cfg.mixed.effect_lyric === 'static') updateStaticLyric(data.lyric.lines, mAlign);
+                else updateAppleMusicScroll(data.lyric.all_lines, data.lyric.active_idx, mixedStyle, cfg.mixed.effect_lyric, mAlign);
             } else { 
                 lc.classList.add('hidden-lyric');
                 lc.innerHTML = '';
@@ -441,10 +464,15 @@ async function updateData() {
             ul.style.color = cfg.queue.color;
             ul.style.fontWeight = cfg.queue.is_bold ? 'bold' : 'normal';
             const max = cfg.queue.max_chars || 999;
-            if (data.list.length === 0) ul.innerHTML = '<li class="empty">队列空闲中...</li>';
+            // 第6步·高价值3/5/6（queue-only 页同样可配）
+            const qItems = (cfg.queue.max_items && cfg.queue.max_items > 0) ? data.list.slice(0, cfg.queue.max_items) : data.list;
+            if (qItems.length === 0) ul.innerHTML = '<li class="empty">队列空闲中...</li>';
             else {
-                let html = ''; data.list.forEach((item, i) => {
-                    let s = `${i+1}. ${item.display_name}${item.requester ? '-'+item.requester : ''}`;
+                const qIdx = cfg.queue.show_index !== false;
+                const qReq = cfg.queue.show_requester !== false;
+                const qSep = (cfg.queue.requester_sep !== undefined) ? cfg.queue.requester_sep : '-';
+                let html = ''; qItems.forEach((item, i) => {
+                    let s = (qIdx ? `${i+1}. ` : '') + item.display_name + (qReq && item.requester ? qSep+item.requester : '');
                     if (s.length > max) s = s.substring(0, max) + '...';
                     html += `<li>${s}</li>`;
                 }); ul.innerHTML = html;
@@ -467,6 +495,7 @@ async function updateData() {
             lc.style.setProperty('--lyric-font-size', cfg.lyric.size + 'px');
             lc.style.setProperty('--lyric-color', cfg.lyric.color);
             lc.style.setProperty('--lyric-font-weight', cfg.lyric.is_bold ? 'bold' : 'normal');
+            applyLyricOpacity(cfg.lyric.opacity, lc);   // 第6步·透明度T-A
             document.body.setAttribute('data-lyric-effect', cfg.lyric.effect);
             
             if (cfg.lyric.effect === 'static') updateStaticLyric(data.lyric.lines, align);
