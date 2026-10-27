@@ -43,6 +43,7 @@ class MusicApp:
         self.root.title(f"控制台 - 房间 {self.config.get('room_id', '未配置')}"); self.root.geometry("780x880")
         self.setup_ui()
         self.download_tasks = {}
+        self.last_download_reason = None   # 需求9：单行结论的失败归因标记
         self.thread = threading.Thread(target=self.start_async_loop, daemon=True); self.thread.start()
 
     def init_audio_engine(self):
@@ -631,7 +632,10 @@ class MusicApp:
             await asyncio.sleep(1.5)
 
     async def download_audio_qq(self, song_info, retries=3):
-        if not state.qq_credential: return None, None, None
+        self.last_download_reason = None
+        if not state.qq_credential:
+            self.last_download_reason = "no_credential"
+            return None, None, None
         song_mid = song_info.get("mid")
         display_name = song_info.get("display_name", "")
         preferred_q = state.style_config.get("audio_quality", "flac")
@@ -639,6 +643,7 @@ class MusicApp:
 
         primary_cached = musiclib.find_cached_file_for_tier(song_mid, preferred_q)
         if primary_cached:
+            self.last_download_reason = "cached"
             try: os.utime(primary_cached, None)
             except Exception as e:
                 print(f"[WARN] 缓存文件时间戳更新失败: {e}")
@@ -674,6 +679,7 @@ class MusicApp:
             cached_tier_file = musiclib.find_cached_file_for_tier(song_mid, tier_key)
             if cached_tier_file:
                 if idx > 0: self.log(f"无 {chain[0][1]} 音源，已使用本地缓存 [{tier_label}]")
+                self.last_download_reason = "cached"
                 try: os.utime(cached_tier_file, None)
                 except Exception as e:
                     print(f"[WARN] 缓存文件时间戳更新失败: {e}")
@@ -685,6 +691,7 @@ class MusicApp:
                 self.log(f"已刷新CDN节点: {cdn}")
 
             # 使用 retries 参数控制重试次数（默认3次）
+            cred_refreshed = False   # 本档位是否已尝试过凭证续期（最多1次）
             for attempt in range(retries):
                 try:
                     # 每次重试重新获取CDN节点（确保不复用过期节点）
@@ -698,24 +705,44 @@ class MusicApp:
 
                     async with Client(credential=state.qq_credential) as client:
                         ft_enum = musiclib.resolve_song_file_type(client, enum_names)
-                        if ft_enum is None and tier_key != "mp3_128":
+                        if ft_enum is None and tier_key not in ("mp3_128", "default"):
                             self.log(f"[{tier_label}] 无法探测音质枚举类型，跳过此档位")
                             break
 
                         url_res = await musiclib.request_song_url_with_type(client, song_mid, ft_enum, state.qq_credential)
-                        fresh_url = musiclib.extract_url(url_res, cdn=cdn)
+                        detail = musiclib.extract_url_detail(url_res, cdn=cdn)
+                        fresh_url = detail["url"]
                         if attempt > 0 and fresh_url:
                             self.log(f"[INFO] 重试获取到新的下载URL (音质={tier_label})")
 
                         if not fresh_url:
-                            self.log(f"[{tier_label}] 未能获取下载URL，跳过此档位")
+                            code = detail.get("result")
+                            why = detail.get("result_text") or "未知原因"
+                            if code == 104013:
+                                self.log(f"[{tier_label}] 播放设备受限(104013)，整首放弃，请重新扫码登录 QQ音乐")
+                                self.last_download_reason = "device_limited"
+                                return None, display_name, song_mid
+                            if code == 104003:
+                                self.log(f"[{tier_label}] 无该档位权限({why})，直接跳下一档")
+                                break
+                            if code == 104004 and not cred_refreshed:
+                                cred_refreshed = True
+                                new_cred = await musiclib.try_refresh_credential(state.qq_credential)
+                                if new_cred:
+                                    state.qq_credential = new_cred
+                                    settings.save_credential(new_cred)
+                                    self.log(f"[{tier_label}] VKey获取失败({why})，凭证已自动续期，重试本档")
+                                    continue
+                                self.log(f"[{tier_label}] VKey获取失败({why})，且凭证续期失败，跳档")
+                                break
+                            self.log(f"[{tier_label}] 未能获取下载URL：{why} (result={code})，跳过此档位")
                             break
 
                         selected_ext = musiclib.detect_ext_from_url(fresh_url, default_ext)
                         file_path = os.path.join(settings.CACHE_DIR, f"{song_mid}_{tier_key}{selected_ext}")
 
                         if attempt == 0:
-                            self.log(f"[INFO] 首次下载 [{tier_label}]: {display_name} (URL签名时效: 约{int(time.time())})...")
+                            self.log(f"[INFO] 首次下载 [{tier_label}]: {display_name} (URL有效期字段: {detail.get('expiration')})...")
                         else:
                             self.log(f"[INFO] 重试下载 [{tier_label}] (第{attempt+1}/{retries}次)...")
 
@@ -728,6 +755,7 @@ class MusicApp:
                                         size_mb = len(data) / (1024 * 1024)
                                         self.log(f"[INFO] ✅ 下载完成 [{tier_label}] ({size_mb:.1f} MB): {display_name} | 文件路径: {file_path}")
                                         musiclib.clean_cache_if_needed()
+                                        self.last_download_reason = "downloaded"
                                         return file_path, display_name, song_mid
                                 elif resp.status == 403:
                                     self.log(f"[{tier_label}] 下载被拦截(403)，将刷新CDN节点和链接后重试...")
@@ -738,9 +766,26 @@ class MusicApp:
                                     self.log(f"[{tier_label}] 下载失败: HTTP {resp.status}")
                                     break
                 except Exception as e:
-                    self.log(f"[{tier_label}] 网络异常: {type(e).__name__}: {e}")
+                    action, reason = musiclib.classify_api_exception(e)
+                    if action == "quota":
+                        self.log(f"[{tier_label}] ⛔ {reason} ({type(e).__name__})，停止本首后续尝试")
+                        self.last_download_reason = "quota"
+                        return None, display_name, song_mid
+                    if action == "refresh_cred" and not cred_refreshed:
+                        cred_refreshed = True
+                        new_cred = await musiclib.try_refresh_credential(state.qq_credential)
+                        if new_cred:
+                            state.qq_credential = new_cred
+                            settings.save_credential(new_cred)
+                            self.log(f"[{tier_label}] {reason}，已自动续期凭证并重试本档")
+                            continue
+                        self.log(f"[{tier_label}] {reason}，且自动续期失败，请重新扫码登录 QQ音乐；跳过此档位")
+                        break
+                    if action == "skip":
+                        self.log(f"[{tier_label}] 上游拒绝({reason}: {type(e).__name__})，不重试，跳过此档位")
+                        break
+                    self.log(f"[{tier_label}] 网络异常({reason}: {type(e).__name__})，退避后重试")
                     retry_delay = 2 + random.uniform(0, 1.5)  # 基础2秒 + 随机抖动
-                    self.log(f"[INFO] 网络异常等待 {retry_delay:.1f}秒后重试")
                     await asyncio.sleep(retry_delay)
 
             if idx < len(chain) - 1:
@@ -751,6 +796,7 @@ class MusicApp:
                 await asyncio.sleep(fallback_delay)
 
         self.log(f"彻底无法下载《{display_name}》，所有音质均失败")
+        self.last_download_reason = "all_failed"
         return None, display_name, song_mid
 
     def predownload_song(self, song_mid, display_name):

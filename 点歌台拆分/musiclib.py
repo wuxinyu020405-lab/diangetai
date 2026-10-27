@@ -278,21 +278,91 @@ def extract_song_info(search_res):
         return mid, name, singer_name, first_song_obj
     except Exception: return None, None, None, None
 
-def extract_url(url_res, cdn=""):
-    if not url_res: return None
-    try:
-        if hasattr(url_res, 'data') and isinstance(url_res.data, list):
-            if not cdn and hasattr(url_res, 'sip') and url_res.sip: cdn = url_res.sip[0]
-            for info in url_res.data:
-                purl = getattr(info, 'purl', None) or getattr(info, 'url', None)
-                if purl:
-                    if purl.startswith('http'): return purl
-                    if cdn: return f"{cdn.rstrip('/')}/{purl.lstrip('/')}"
-        if isinstance(url_res, dict):
-            for val in url_res.values():
-                if isinstance(val, str) and val.startswith('http'): return val
-        if hasattr(url_res, 'urls') and len(url_res.urls) > 0: return getattr(url_res.urls[0], 'url', None)
-    except Exception as e:
-        print(f"[WARN] 异常已捕获: {e}")
+# ================= 下载失败归因（需求9：读 result 业务码 + 异常分类） =================
+# 库官方文档（qqmusic_api/models/song.py UrlinfoItem.result）：
+#   0=成功, 104003=无权限, 104004=VKey获取失败, 104013=播放设备受限
+URL_RESULT_TEXT = {
+    0: "成功",
+    104003: "无该音质权限",
+    104004: "VKey获取失败",
+    104013: "播放设备受限",
+}
 
-    return None
+try:
+    from qqmusic_api.core import exceptions as qq_exc
+except Exception:
+    qq_exc = None
+
+
+def url_result_text(code):
+    return URL_RESULT_TEXT.get(code, f"未知业务码({code})")
+
+
+def extract_url_detail(url_res, cdn=""):
+    """解析 get_song_urls 响应，返回 dict：
+    {url, result, result_text, filename, expiration}
+    - 成功: url 为完整下载地址, result=0
+    - 业务失败: url=None, result=业务码, result_text=中文含义
+    - 结构异常: url=None, result=None, result_text 说明原因
+    与原 extract_url 的区别：不再丢弃 result/expiration，失败可归因。"""
+    detail = {"url": None, "result": None, "result_text": "", "filename": None, "expiration": None}
+    if not url_res:
+        detail["result_text"] = "响应为空"
+        return detail
+    try:
+        detail["expiration"] = getattr(url_res, "expiration", None)
+        data = getattr(url_res, "data", None)
+        if not (isinstance(data, list) and data):
+            detail["result_text"] = "响应无 data 列表"
+            return detail
+        info = data[0]
+        detail["filename"] = getattr(info, "filename", None)
+        code = getattr(info, "result", None)
+        detail["result"] = code
+        if code is not None and code != 0:
+            detail["result_text"] = url_result_text(code)
+            return detail
+        purl = getattr(info, "purl", None) or ""
+        if not purl:
+            detail["result_text"] = "purl 为空(result=0)"
+            return detail
+        if purl.startswith("http"):
+            detail["url"] = purl
+        elif cdn:
+            detail["url"] = f"{cdn.rstrip('/')}/{purl.lstrip('/')}"
+        else:
+            detail["result_text"] = "purl 为相对路径但无 CDN 前缀"
+    except Exception as e:
+        detail["result_text"] = f"解析异常 {type(e).__name__}: {e}"
+    return detail
+
+
+def classify_api_exception(exc):
+    """把 qqmusic_api 异常分类为处置动作。返回 (action, 中文描述)。
+    action: quota=触发风控配额(立即中止) / refresh_cred=凭证过期(续期后重试)
+            skip=上游拒绝(不重试,跳档) / retry=网络问题(退避重试)
+    分类顺序重要：Ratelimited/Credential 都继承 CgiApiException，必须先判子类。"""
+    if qq_exc is not None:
+        if isinstance(exc, qq_exc.RatelimitedError):
+            return "quota", "触发服务端风控/配额限制"
+        if isinstance(exc, (qq_exc.CredentialExpiredError, qq_exc.LoginAuthExpiredError)):
+            return "refresh_cred", "登录凭证过期"
+        if isinstance(exc, (qq_exc.TimeoutNetworkError, qq_exc.NetworkError)):
+            return "retry", "网络超时/中断"
+        if isinstance(exc, (qq_exc.ApiDataError, qq_exc.GlobalApiError, qq_exc.CgiApiException)):
+            return "skip", "上游接口拒绝或数据异常"
+    return "retry", f"未分类异常 {type(exc).__name__}"
+
+
+async def try_refresh_credential(credential):
+    """尝试用库自带能力续期凭证。成功返回新 Credential，失败返回 None。"""
+    if credential is None:
+        return None
+    try:
+        async with Client(credential=credential) as client:
+            res = client.login.refresh_credential(credential)
+            if inspect.isawaitable(res):
+                res = await res
+            return res
+    except Exception:
+        return None
