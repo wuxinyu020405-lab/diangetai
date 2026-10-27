@@ -95,6 +95,7 @@ async def process_one_request(req, app_instance):
         "device_limited": "播放设备受限，请重新扫码登录QQ音乐",
         "no_credential": "未登录或凭证失效，请重新扫码登录",
         "all_failed": "无版权或全部音质获取失败",
+        "budget": "超出单首时间预算(可能网络慢/服务端拖)",
     }.get(reason, reason or "未知原因")
     app_instance.log(f"❌ 未入列: 《{display_name}》-{uname} 原因: {why}")
     return reason or "failed"

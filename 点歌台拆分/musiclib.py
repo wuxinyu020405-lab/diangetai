@@ -45,6 +45,18 @@ def clean_cache_if_needed():
     try:
         if not os.path.exists(settings.CACHE_DIR):
             return
+        # 第7步：清理孤儿 .part（下载中进程被杀/断电的残留）。
+        # 单首预算≤45s，mtime 超过10分钟的 .part 必属残留，可安全删除。
+        cutoff = _time.time() - 600
+        for f in os.listdir(settings.CACHE_DIR):
+            if f.endswith(".part"):
+                fp = os.path.join(settings.CACHE_DIR, f)
+                try:
+                    if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                        os.remove(fp)
+                        print(f"🧹 清理孤儿下载残片: {f}")
+                except OSError as e:
+                    print(f"[WARN] 清理 .part 失败: {e}")
         max_files = state.style_config.get("max_cache_files", 100)
         max_size_mb = state.style_config.get("max_cache_size_mb", 500)
         files = []
