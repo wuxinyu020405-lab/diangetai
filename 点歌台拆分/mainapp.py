@@ -499,6 +499,8 @@ class MusicApp:
         self.init_audio_engine()
 
         asyncio.create_task(self.music_player_worker()); asyncio.create_task(self.system_media_worker()); asyncio.create_task(self.lyric_sync_worker())
+        # 需求3：点歌串行处理 worker（pending_requests → 逐首出结论）
+        asyncio.create_task(danmaku.song_request_worker(self))
         
         cookies = {}
         bili_cookie = self.config.get('bili_cookie', '')
@@ -813,28 +815,10 @@ class MusicApp:
         self.last_download_reason = "all_failed"
         return None, display_name, song_mid
 
-    def predownload_song(self, song_mid, display_name, flac_size=None):
-        if not state.qq_credential or not song_mid: return
-        # 需求2·本地优先：任意新档命名命中即不下（不再只查首选档）
-        if musiclib.find_any_cached_file(song_mid):
-            self.log(f"✅ 本地已有该歌曲（命中缓存），跳过下载: {display_name}")
-            return
-        if song_mid in self.download_tasks: return
-
-        # 原"歌名模糊匹配"调用已移除：入参是 '歌名 歌手' 拼接串，实测对
-        # '歌名 - 歌手.ext' 命名 100% 不命中；且其内部 music.load() 会掐断
-        # 正在播放的流（审阅报告问题2）。缓存检索由上方 find_any_cached_file 覆盖。
-        song_info = {"mid": song_mid, "display_name": display_name, "flac_size": flac_size}
-        preferred_q = settings.normalize_quality_key(state.style_config.get("audio_quality", "flac"))
-        q_label = settings.QUALITY_UI_MAP.get(preferred_q, preferred_q)
-        self.log(f"⏬ 开始后台预下载 ({q_label}): {display_name}")
-        task = asyncio.create_task(self._download_and_cleanup(song_mid, song_info))
-        self.download_tasks[song_mid] = task
-
-    async def _download_and_cleanup(self, song_mid, song_info):
-        try: await self.download_audio_qq(song_info)
-        except Exception as e: self.log(f"❌ 预下载《{song_info.get('display_name', '')}》失败: {type(e).__name__}: {e}")
-        finally: self.download_tasks.pop(song_mid, None)
+    # predownload_song / _download_and_cleanup 已随需求1+3移除：
+    # 下载不再是"乐观入列 + 后台预取"，而是串行处理流程内同步完成，
+    # 成功后才入 playlist（见 danmaku.process_one_request）。
+    # self.download_tasks 保留为空字典（不再写入），避免其他旧引用出错。
 
     async def music_player_worker(self):
         global current_song, current_play_mode, system_media_info, active_lrc_lines, active_song_start_ts, active_song_base_pos
@@ -852,17 +836,8 @@ class MusicApp:
 
                 has_file = bool(file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
 
-                if not has_file and song_mid and song_mid in self.download_tasks:
-                    self.log(f"⏳ 等待后台预下载完成: {state.current_song['display_name']}...")
-                    while song_mid in self.download_tasks and not state.skip_event.is_set():
-                        await asyncio.sleep(0.5)
-                    if state.skip_event.is_set():
-                        self.log("⏭️ 等待下载期间收到切歌指令，自动跳过")
-                        state.skip_event.clear(); state.current_song = None; state.active_lrc_lines = []
-                        continue
-
-                    file_path = musiclib.find_any_cached_file(song_mid)
-                    has_file = bool(file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
+                # （原"等待后台预下载"块已随需求1+3移除：playlist 只含就绪歌曲，
+                #   串行处理在入列前已同步完成下载，播放器无需再等。）
 
                 real_name = state.current_song.get("display_name", "")
                 
