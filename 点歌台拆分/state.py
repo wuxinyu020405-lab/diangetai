@@ -1,0 +1,60 @@
+"""
+运行时共享状态：跨模块可变的全局，一律以 state.xxx 读写
+"""
+
+
+# ================= 全局状态 =================
+playlist = []
+
+current_song = None
+
+skip_event = None
+
+app = None
+
+system_media_info = {"title": "暂无播放", "artist": ""}
+
+current_lyric_info = {"lines": [], "all_lines": [], "active_idx": -1}
+
+lyric_cache = {}  
+
+qq_credential = None 
+
+# 👇 整合部署后的完整独立配置结构（包含纯歌词对齐方式，移除了透明度配置）
+style_config = {
+    "mixed": {
+        "show_playing": True, "show_queue": True, "show_lyric": True,
+        "font_playing": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_playing": "#00FFFF", "size_playing": 32, "bold_playing": False,
+        "font_lyric": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_lyric": "#FFE600", "size_lyric": 28, "effect_lyric": "apple_hd", "bold_lyric": False,
+        "font_queue": "'PingFang SC', 'Microsoft YaHei', sans-serif", "color_queue": "#FFFFFF", "size_queue": 36, "bold_queue": False
+    },
+    "lyric": {
+        "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
+        "color": "#FFE600", "size": 28, "align": "center",
+        "effect": "apple_hd", "lines_prev": 2, "lines_next": 2,
+        "pure_text": "纯音乐, 请欣赏..", "is_bold": False
+    },
+    "playing": {
+        "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
+        "color": "#00FFFF", "size": 32, "show_prefix": True, "is_bold": False
+    },
+    "queue": {
+        "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
+        "color": "#FFFFFF", "size": 36, "max_chars": 30, "is_bold": False
+    },
+    "audio_quality": "flac",
+    "max_cache_files": 100,
+    "max_cache_size_mb": 500
+}
+
+current_play_mode = "local" 
+
+is_local_playing = True    
+
+bgm_paused_by_bot = False
+
+active_lrc_lines = []
+
+active_song_start_ts = 0.0
+
+active_song_base_pos = 0.0

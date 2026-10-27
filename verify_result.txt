@@ -1,0 +1,101 @@
+Python: 3.12.10 | D:\点歌台干活处\.venv\Scripts\python.exe
+======================================================================
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+
+✅ import ply
+     L1
+✅ import jsonpath_ng
+     L2
+✅ import jsonpath_ng.ext
+     L3
+✅ import tkinter
+     L8
+✅ import tkinter.messagebox
+     L9
+✅ import threading
+     L10
+✅ import asyncio
+     L11
+✅ import inspect
+     L12
+✅ import re
+     L13
+✅ import html
+     L14
+✅ import random
+     L15
+✅ import urllib.parse
+     L16
+✅ import urllib.request
+     L17
+✅ import aiohttp
+     L18
+✅ import aiohttp.web
+     L19
+✅ import time
+     L20
+✅ import ctypes
+     L21
+✅ import ctypes.wintypes
+     L22
+✅ import winsdk.windows.media.control
+     L23
+✅ import blivedm
+     L24
+✅ import json
+     L25
+✅ import os
+     L26
+✅ import sys
+     L27
+✅ import subprocess
+     L28
+✅ import pygame
+     L29
+✅ import selenium
+     L30
+✅ import selenium.webdriver.chrome.service
+     L31
+✅ import selenium.webdriver.edge.service
+     L32
+✅ import selenium.webdriver.chrome.options
+     L33
+✅ import selenium.webdriver.edge.options
+     L34
+✅ import qqmusic_api
+     L35
+✅ from qqmusic_api import Client, Credential
+     Client/Credential 可用
+✅ qqmusic_api SongFileInfo/SongFileType 探测
+     modules.song 命中；FileType 成员数=17
+✅ SongFileInfo(mid=) 构造
+     SongFileInfo(mid=...) 构造 OK (源码 L249)
+✅ Credential(musicid=, musickey=)
+     musicid=123
+✅ BLiveClient(room_id, session=...) 绑定
+     blivedm 1.1.7; 形参 ['self', 'room_id', 'uid', 'session', 'heartbeat_interval']
+✅ BLiveClient.set_handler (源码 L1752)
+     set_handler 存在
+✅ BLiveClient.start 同步性 (源码 L1752)
+     start 同步 + 源码 L1752 client.start() 未 await —— 一致
+✅ BLiveClient.stop_and_close (源码 L1755 await)
+     协程(源码 await 正确)
+✅ BaseHandler._on_danmaku 签名 (源码 L2118)
+     基类 _on_danmaku 同步，与源码 L2118 def 一致
+✅ BiliHandler.__init__ super() (源码 L2117)
+     BaseHandler 可无参构造 + super().__init__()
+✅ DanmakuMessage.uname/.msg
+     DanmakuMessage 字段 uname=True msg=True (源码 L2119-L2120)
+✅ blivedm.handlers 可达
+     handlers 模块: blivedm.handlers
+✅ winsdk SMTC await
+     await request_async() -> GlobalSystemMediaTransportControlsSessionManager，get_sessions/get_current_session 可用 (源码 L1798/L1805)
+✅ aiohttp.web 服务原语
+     Application/AppRunner.setup/TCPSite.start 全链路 OK (源码 L1726-L1733)
+✅ blivedm 源码集成 (L1749-L1755)
+     blivedm 1.1.7 + aiohttp 3.14.5 外部 session 构造/关闭 OK
+✅ pygame.mixer.init 参数
+     mixer.init(48000,-16,2,2048) 成功=True
+======================================================================
+总计 47 项 | 失败 0 | 需关注 0
