@@ -178,7 +178,7 @@ class MusicApp:
         quality_group = tk.LabelFrame(basic_inner, text="点歌音质", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
         quality_group.pack(fill=tk.X, pady=5)
         tk.Label(quality_group, text="首选音质:", bg="#f0f0f0").grid(row=0, column=0, padx=10, pady=10, sticky="e")
-        self.var_audio_quality = tk.StringVar(value=settings.QUALITY_UI_MAP.get(state.style_config.get("audio_quality", "flac"), "FLAC 无损品质 (推荐)"))
+        self.var_audio_quality = tk.StringVar(value=settings.QUALITY_UI_MAP.get(settings.normalize_quality_key(state.style_config.get("audio_quality", "flac")), "FLAC 无损品质"))
         self.combo_quality_top = ttk.Combobox(quality_group, textvariable=self.var_audio_quality, values=list(settings.QUALITY_UI_MAP.values()), state="readonly", width=25)
         self.combo_quality_top.bind("<<ComboboxSelected>>", self.update_audio_quality)
         self.combo_quality_top.grid(row=0, column=1, sticky="w")
@@ -444,8 +444,8 @@ class MusicApp:
 
     def update_audio_quality(self, event=None):
         val = self.var_audio_quality.get()
-        q_key = settings.UI_QUALITY_MAP.get(val, "flac")
-        state.style_config["audio_quality"] = q_key
+        q_key = settings.UI_QUALITY_MAP.get(val)
+        state.style_config["audio_quality"] = settings.normalize_quality_key(q_key)
         self.schedule_save_style()
         self.log(f"🎵 点歌首选音质已切换为: 【{val}】 (无对应音源时自动平滑降级)")
     
@@ -633,21 +633,35 @@ class MusicApp:
 
     async def download_audio_qq(self, song_info, retries=3):
         self.last_download_reason = None
+        song_mid = song_info.get("mid")
+        display_name = song_info.get("display_name", "")
+
+        # 需求2·本地优先（置于凭证检查之前）：缓存命中即可播放，不需要下载，
+        # 因此凭证过期/缺失时老缓存照样能用。
+        any_cached = musiclib.find_any_cached_file(song_mid)
+        if any_cached:
+            self.last_download_reason = "cached"
+            try: os.utime(any_cached, None)
+            except Exception as e:
+                print(f"[WARN] 缓存文件时间戳更新失败: {e}")
+            return any_cached, display_name, song_mid
+
         if not state.qq_credential:
             self.last_download_reason = "no_credential"
             return None, None, None
-        song_mid = song_info.get("mid")
-        display_name = song_info.get("display_name", "")
-        preferred_q = state.style_config.get("audio_quality", "flac")
+        preferred_q = settings.normalize_quality_key(state.style_config.get("audio_quality", "flac"))
         chain = settings.QUALITY_FALLBACK_CHAINS.get(preferred_q, settings.QUALITY_FALLBACK_CHAINS["flac"])
 
-        primary_cached = musiclib.find_cached_file_for_tier(song_mid, preferred_q)
-        if primary_cached:
-            self.last_download_reason = "cached"
-            try: os.utime(primary_cached, None)
-            except Exception as e:
-                print(f"[WARN] 缓存文件时间戳更新失败: {e}")
-            return primary_cached, display_name, song_mid
+        # 需求5：size_flac 预检（前置到所有网络动作之前）——
+        # 搜索结果明确报无 FLAC(=0) 时，直接把 FLAC 档从链里剔掉，
+        # 连 1.5s 预热和 CDN 请求都不用为它花。None=未知，保留该档（宁可多试不可漏放）。
+        if song_info.get("flac_size") == 0:
+            pruned = [t for t in chain if t[0] != "flac"]
+            if pruned:
+                self.log(f"[INFO] 搜索结果标记无 FLAC 音源(size_flac=0)，本首仅尝试: {[t[1] for t in pruned]}")
+                chain = pruned
+
+        # （本地优先缓存检索已置于函数顶部、凭证检查之前，避免在此重复）
 
         # 辅助函数：每次重试时重新获取CDN分发信息（避免使用过期的CDN节点）
         async def fetch_cdn():
@@ -675,7 +689,7 @@ class MusicApp:
             "Cookie": f"uin=o{state.qq_credential.musicid}; qm_keyst={state.qq_credential.musickey};"
         }
 
-        for idx, (tier_key, tier_label, enum_names, default_ext) in enumerate(chain):
+        for idx, (tier_key, tier_label, enum_names, default_ext, needs_enum) in enumerate(chain):
             cached_tier_file = musiclib.find_cached_file_for_tier(song_mid, tier_key)
             if cached_tier_file:
                 if idx > 0: self.log(f"无 {chain[0][1]} 音源，已使用本地缓存 [{tier_label}]")
@@ -704,8 +718,8 @@ class MusicApp:
                             self.log(f"[WARN] 重试 [{tier_label}] (第{attempt+1}/{retries}次)，CDN刷新失败")
 
                     async with Client(credential=state.qq_credential) as client:
-                        ft_enum = musiclib.resolve_song_file_type(client, enum_names)
-                        if ft_enum is None and tier_key not in ("mp3_128", "default"):
+                        ft_enum = musiclib.resolve_song_file_type(client, enum_names) if needs_enum else None
+                        if needs_enum and ft_enum is None:
                             self.log(f"[{tier_label}] 无法探测音质枚举类型，跳过此档位")
                             break
 
@@ -799,19 +813,19 @@ class MusicApp:
         self.last_download_reason = "all_failed"
         return None, display_name, song_mid
 
-    def predownload_song(self, song_mid, display_name):
+    def predownload_song(self, song_mid, display_name, flac_size=None):
         if not state.qq_credential or not song_mid: return
-        preferred_q = state.style_config.get("audio_quality", "flac")
-        if musiclib.find_cached_file_for_tier(song_mid, preferred_q): return
-        if song_mid in self.download_tasks: return
-        
-        # 检查本地是否有该歌曲（通过歌名模糊匹配）
-        exists, cached_path = musiclib.check_local_song_exists(settings.CACHE_DIR, display_name, "")
-        if exists:
-            self.log(f"✅ 本地已有该歌曲，跳过下载: {display_name}")
+        # 需求2·本地优先：任意新档命名命中即不下（不再只查首选档）
+        if musiclib.find_any_cached_file(song_mid):
+            self.log(f"✅ 本地已有该歌曲（命中缓存），跳过下载: {display_name}")
             return
+        if song_mid in self.download_tasks: return
 
-        song_info = {"mid": song_mid, "display_name": display_name}
+        # 原"歌名模糊匹配"调用已移除：入参是 '歌名 歌手' 拼接串，实测对
+        # '歌名 - 歌手.ext' 命名 100% 不命中；且其内部 music.load() 会掐断
+        # 正在播放的流（审阅报告问题2）。缓存检索由上方 find_any_cached_file 覆盖。
+        song_info = {"mid": song_mid, "display_name": display_name, "flac_size": flac_size}
+        preferred_q = settings.normalize_quality_key(state.style_config.get("audio_quality", "flac"))
         q_label = settings.QUALITY_UI_MAP.get(preferred_q, preferred_q)
         self.log(f"⏬ 开始后台预下载 ({q_label}): {display_name}")
         task = asyncio.create_task(self._download_and_cleanup(song_mid, song_info))
@@ -831,22 +845,12 @@ class MusicApp:
                 self.log(f"▶️ 准备播放: {state.current_song['display_name']}-{requester}")
                 song_mid = state.current_song.get("mid")
 
-                preferred_q = state.style_config.get("audio_quality", "flac")
-                
-                file_path = None
-                for tier_key, _, _, _ in settings.QUALITY_FALLBACK_CHAINS.get(preferred_q, settings.QUALITY_FALLBACK_CHAINS["flac"]):
-                    file_path = musiclib.find_cached_file_for_tier(song_mid, tier_key)
-                    if file_path: break
+                preferred_q = settings.normalize_quality_key(state.style_config.get("audio_quality", "flac"))
+
+                # 需求2·本地优先：任意有效档命中即用（与下载侧同一判据）
+                file_path = musiclib.find_any_cached_file(song_mid)
 
                 has_file = bool(file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
-
-                # 如果缓存中没找到，尝试通过歌名匹配本地文件
-                if not has_file and song_mid:
-                    exists, cached_path = musiclib.check_local_song_exists(settings.CACHE_DIR, state.current_song.get('display_name', ''), '')
-                    if exists:
-                        file_path = cached_path
-                        has_file = True
-                        self.log(f"✅ 通过歌名匹配找到本地文件，跳过下载: {state.current_song.get('display_name', '')}")
 
                 if not has_file and song_mid and song_mid in self.download_tasks:
                     self.log(f"⏳ 等待后台预下载完成: {state.current_song['display_name']}...")
@@ -856,11 +860,8 @@ class MusicApp:
                         self.log("⏭️ 等待下载期间收到切歌指令，自动跳过")
                         state.skip_event.clear(); state.current_song = None; state.active_lrc_lines = []
                         continue
-                    
-                    file_path = None
-                    for tier_key, _, _, _ in settings.QUALITY_FALLBACK_CHAINS.get(preferred_q, settings.QUALITY_FALLBACK_CHAINS["flac"]):
-                        file_path = musiclib.find_cached_file_for_tier(song_mid, tier_key)
-                        if file_path: break
+
+                    file_path = musiclib.find_any_cached_file(song_mid)
                     has_file = bool(file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
 
                 real_name = state.current_song.get("display_name", "")

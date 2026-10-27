@@ -68,43 +68,33 @@ def merge_config(old_cfg, new_cfg):
     if "max_cache_size_mb" in old_cfg: new_cfg["max_cache_size_mb"] = old_cfg["max_cache_size_mb"]
     return new_cfg
 
+# ── 需求5/6（第二批拍板）：音质收敛为两档 ──────────────────────────
+# "flac"    = FLAC 无损（枚举候选 FLAC/F000/SQ）
+# "default" = 默认品质：不传 file_type，吃库 get_song_urls 的函数默认值 MP3_128
+#   （⚠️ 库若日后改默认值，此档行为跟着变——用户已选择"严格吃库默认"）
+# 档位元组 5 字段：(tier_key, tier_label, enum候选名, 默认扩展名, needs_enum)
+#   needs_enum=False 的档位不参与枚举探测，resolve 出 None 也不算错（13.1 方案B）
 QUALITY_UI_MAP = {
-    "flac": "FLAC 无损品质 (推荐)",
-    "hires": "Hi-Res 高解析无损 (优先)",
-    "master": "臻品母带 Master (优先)",
-    "mp3_320": "320k 高品质 MP3",
-    "mp3_128": "128k 标准 MP3 (省流)"
+    "flac": "FLAC 无损品质",
+    "default": "默认品质",
 }
 
 UI_QUALITY_MAP = {v: k for k, v in QUALITY_UI_MAP.items()}
 
 QUALITY_FALLBACK_CHAINS = {
-    "master": [
-        ("master", "臻品母带", ("MASTER", "AI00"), ".flac"),
-        ("hires", "Hi-Res 无损", ("HI_RES", "HIRES", "RS01", "FLAC_HIRES"), ".flac"),
-        ("flac", "FLAC 无损", ("FLAC", "F000", "SQ"), ".flac"),
-        ("mp3_320", "320k 高品质 MP3", ("MP3_320", "M800", "HQ"), ".mp3"),
-        ("mp3_128", "128k 标准 MP3", ("MP3_128", "M500"), ".mp3"),
-    ],
-    "hires": [
-        ("hires", "Hi-Res 无损", ("HI_RES", "HIRES", "RS01", "FLAC_HIRES"), ".flac"),
-        ("flac", "FLAC 无损", ("FLAC", "F000", "SQ"), ".flac"),
-        ("mp3_320", "320k 高品质 MP3", ("MP3_320", "M800", "HQ"), ".mp3"),
-        ("mp3_128", "128k 标准 MP3", ("MP3_128", "M500"), ".mp3"),
-    ],
     "flac": [
-        ("flac", "FLAC 无损", ("FLAC", "F000", "SQ"), ".flac"),
-        ("mp3_320", "320k 高品质 MP3", ("MP3_320", "M800", "HQ"), ".mp3"),
-        ("mp3_128", "128k 标准 MP3", ("MP3_128", "M500"), ".mp3"),
+        ("flac", "FLAC 无损", ("FLAC", "F000", "SQ"), ".flac", True),
+        ("default", "默认品质", (), ".mp3", False),
     ],
-    "mp3_320": [
-        ("mp3_320", "320k 高品质 MP3", ("MP3_320", "M800", "HQ"), ".mp3"),
-        ("mp3_128", "128k 标准 MP3", ("MP3_128", "M500"), ".mp3"),
-    ],
-    "mp3_128": [
-        ("mp3_128", "128k 标准 MP3", ("MP3_128", "M500"), ".mp3"),
+    "default": [
+        ("default", "默认品质", (), ".mp3", False),
     ],
 }
+
+
+def normalize_quality_key(q):
+    """旧配置值归一：flac/master/hires（无损诉求）→ flac；mp3_320/mp3_128/未知 → default。"""
+    return "flac" if q in ("flac", "master", "hires") else "default"
 
 def get_default_browser_path():
     """探测本机 Edge / Chrome 的安装路径，返回 (类型, 路径) 或 None。

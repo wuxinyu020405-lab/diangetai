@@ -37,7 +37,7 @@ async def search_and_add(song_name, uname, app_instance, retry=2):
             app_instance.log(f"搜索第{_+1}/{retry}次尝试...")
             await asyncio.sleep(1)
 
-        song_mid, real_name, singer_name, _ = musiclib.extract_song_info(search_res)
+        song_mid, real_name, singer_name, _, flac_size = musiclib.extract_song_info(search_res)
         if not song_mid:
             app_instance.log(f"❌ 没找到《{song_name}》或解析失败")
             return
@@ -46,7 +46,7 @@ async def search_and_add(song_name, uname, app_instance, retry=2):
 
         state.playlist.append({"name": real_name, "display_name": display_name, "mid": song_mid, "requester": uname})
         app_instance.log(f"✅ 已加入队列: {display_name}-{uname}")
-        app_instance.predownload_song(song_mid, display_name)
+        app_instance.predownload_song(song_mid, display_name, flac_size=flac_size)
 
     except Exception as e:
         app_instance.log(f"❌ 搜索出错 (检查网络/代理): {e}")

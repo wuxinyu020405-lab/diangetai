@@ -143,16 +143,43 @@ def find_cached_file_for_tier(song_mid, tier_key):
                 except Exception as e:
                     print(f"[WARN] 异常已捕获: {e}")
 
-    if tier_key == "mp3_128":
-        legacy = os.path.join(settings.CACHE_DIR, f"{song_mid}.mp3")
-        if os.path.exists(legacy):
-            if os.path.getsize(legacy) > 100 * 1024: return legacy
-            else:
-                try: os.remove(legacy)
-                except Exception as e:
-                    print(f"[WARN] 异常已捕获: {e}")
-
+    # legacy {mid}.mp3 兼容段已移除（需求2/5：不认旧档命名，见需求整理 13.2）
     return None
+
+
+# 有效缓存文件的最小体积（与 find_cached_file_for_tier 一致）
+MIN_CACHE_BYTES = 100 * 1024
+
+
+def find_any_cached_file(song_mid):
+    """需求2（本地优先·定稿13.4/十五）：按 mid 扫**全部新命名档位**
+    （{mid}_flac.* 与 {mid}_default.*），命中任意有效文件即返回。
+    - 只认新两档命名（第十二节决定2）；旧命名(_master/_hires/_mp3_320/legacy)不识别
+    - <100KB 视为残片删除（与档位检索同一判据）
+    - 同 mid 多档时优先返回 flac（体积大≠一定更好，但符合无损偏好且行为可预期）
+    返回路径或 None。"""
+    if not song_mid: return None
+    found = []
+    for tier_key in ("flac", "default"):
+        for ext in (".flac", ".mp3", ".m4a", ".ogg", ".wav"):
+            candidate = os.path.join(settings.CACHE_DIR, f"{song_mid}_{tier_key}{ext}")
+            if os.path.exists(candidate):
+                try:
+                    if os.path.getsize(candidate) > MIN_CACHE_BYTES:
+                        found.append((tier_key, candidate))
+                    else:
+                        try: os.remove(candidate)
+                        except Exception as e:
+                            print(f"[WARN] 异常已捕获: {e}")
+                except OSError:
+                    continue
+    if not found: return None
+    # 多档命中时 flac 优先
+    for want in ("flac", "default"):
+        for tier_key, path in found:
+            if tier_key == want:
+                return path
+    return found[0][1]
 
 # ==================== 本地缓存检查与损坏文件清理 ====================
 def check_local_song_exists(download_dir: str, title: str, artist: str, min_size_kb: int = 100) -> tuple:
@@ -259,7 +286,9 @@ def clean_corrupted_files(download_dir: str, min_size_kb: int = 100) -> int:
     return removed_count
 
 def extract_song_info(search_res):
-    if not search_res: return None, None, None, None
+    """返回 (mid, name, singer_name, song_obj, flac_size)。
+    flac_size: size_flac 字节数；>0=有FLAC，0=明确没有(预检可跳档)，None=未知(照常尝试)。"""
+    if not search_res: return None, None, None, None, None
     try:
         songs = None
         if hasattr(search_res, 'song'):
@@ -268,15 +297,23 @@ def extract_song_info(search_res):
             elif hasattr(song_attr, 'song'): songs = song_attr.song
             elif isinstance(song_attr, dict) and 'song' in song_attr: songs = song_attr['song']
         if not songs and hasattr(search_res, 'songs'): songs = search_res.songs
-        if not songs or not isinstance(songs, list) or len(songs) == 0: return None, None, None, None
+        if not songs or not isinstance(songs, list) or len(songs) == 0: return None, None, None, None, None
         first_song_obj = songs[0]
         mid = getattr(first_song_obj, 'mid', None)
         name = getattr(first_song_obj, 'name', None)
         singer_name = "未知歌手"
         singer_list = getattr(first_song_obj, 'singer', [])
         if singer_list: singer_name = getattr(singer_list[0], 'name', "未知歌手")
-        return mid, name, singer_name, first_song_obj
-    except Exception: return None, None, None, None
+        flac_size = None
+        try:
+            f = getattr(first_song_obj, "file", None)
+            if f is not None:
+                sz = getattr(f, "size_flac", None)
+                if sz is not None: flac_size = int(sz)
+        except Exception:
+            flac_size = None
+        return mid, name, singer_name, first_song_obj, flac_size
+    except Exception: return None, None, None, None, None
 
 # ================= 下载失败归因（需求9：读 result 业务码 + 异常分类） =================
 # 库官方文档（qqmusic_api/models/song.py UrlinfoItem.result）：
