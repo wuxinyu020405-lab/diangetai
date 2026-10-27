@@ -25,3 +25,6 @@ dist/
 Thumbs.db
 Desktop.ini
 debug.log
+
+# 配额记账（运行时产物，跨重启本地有效）
+quota_state.json
