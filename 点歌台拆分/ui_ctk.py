@@ -145,6 +145,7 @@ def build(app, root):
         # 这样完全不触发子控件重排/重绘（实测 grid_remove→grid 每页 180~880ms，
         # tkraise 为个位数 ms）。
         p = ctk.CTkFrame(body, fg_color="transparent")
+        p._page_name = n     # 标记：供测试与排障识别（不影响运行）
         pages[n] = p
     body.grid_rowconfigure(0, weight=1)
     body.grid_columnconfigure(0, weight=1)
@@ -152,10 +153,15 @@ def build(app, root):
         pages[n].grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
     nav_buttons = {}
     current = {"name": None}
+    # 供外部/测试查询当前页
+    app._page_names = list(PAGE_NAMES)
+    app._pages = pages
+    app._current_page = lambda: current["name"]
 
     def show(name):
-        if current["name"] == name:
-            return
+        # 不做 early-return：即便目标已在上层，也把按钮高亮重刷一遍，
+        # 避免"current 与真实堆叠不同步"导致点击无反馈。
+        # 代价是一次 tkraise + 7 次 configure（实测 <2ms），换来状态绝对可靠。
         pages[name].tkraise()      # 只改堆叠顺序，不动布局
         for n, b in nav_buttons.items():
             b.configure(fg_color=ACCENT if n == name else ("#E2E8F0", "#1E293B"),
@@ -575,16 +581,14 @@ def build(app, root):
     ctk.CTkLabel(bottom, text="OBS 源: http://127.0.0.1:8080",
                  font=_font(11), text_color=MUTED).pack(side="right", padx=14)
 
-    # 所有页面已在启动时建好，这里只需点亮首屏（切换不再触发构建）
-    # 关键：CTk 控件用 Canvas 绘制，首次 map 才付绘制代价（实测单页 180~900ms）。
-    # 启动时把所有页面轮流 map 一次并刷新，把这些代价一次性吃掉，
-    # 之后用户切换只需切换映射状态 → 接近 0ms。
+    # 预热：快速把每页 tkraise 一次，只为触发首次布局计算。
+    # 不做 root.update()（那会强制整窗重绘，实测把启动拖到 5 秒）；
+    # update_idletasks 足够让 CTk 完成内部布局，启动可压到 2 秒内。
+    # ⚠️ 必须用 tkraise，不可用 grid_remove/grid（后者卸载页面会让 tkraise 失效）。
     try:
         for n in PAGE_NAMES:
-            for m, p in pages.items():
-                p.grid() if m == n else p.grid_remove()
+            pages[n].tkraise()
             root.update_idletasks()
-            root.update()
     except Exception:
         pass
     show(name_log)
