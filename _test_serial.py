@@ -23,6 +23,9 @@ def case(name, cond, detail=""):
 
 tmp = tempfile.mkdtemp(prefix="dgc_s4_")
 settings.CACHE_DIR = tmp
+# 测试隔离：配额记账写临时文件，绝不污染真实 quota_state.json
+musiclib.QUOTA_FILE = os.path.join(tmp, "quota.json")
+state.quota_state.update({"date": "2099-01-01", "downloaded": 0, "fail_streak": 0, "cooldown_until": 0.0})
 
 
 class FakeRoot:
