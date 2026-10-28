@@ -272,7 +272,21 @@ class MusicApp:
         self.root.after(0, _log)
 
     def start_async_loop(self):
-        self.loop = asyncio.new_event_loop(); asyncio.set_event_loop(self.loop); self.loop.run_until_complete(self.main_async())
+        # 窗口模式(console=False)下线程崩溃的 traceback 无处显示，用户只能看到
+        # "正在启动 OBS 服务器..." 就没了下文。这里兜住异常：写进 GUI 日志 + 落盘。
+        try:
+            self.loop = asyncio.new_event_loop(); asyncio.set_event_loop(self.loop); self.loop.run_until_complete(self.main_async())
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            try:
+                self.log(f"❌ 后台服务启动失败: {type(e).__name__}: {e}（详见 启动日志.txt）")
+            except Exception:
+                pass
+            try:
+                settings.save_startup_log(tb, "启动日志.txt")
+            except Exception:
+                pass
 
     async def main_async(self):
         global skip_event; state.skip_event = asyncio.Event()
@@ -284,8 +298,26 @@ class MusicApp:
         web_app.router.add_get('/queue', overlay.handle_index)
         web_app.router.add_get('/api/data', overlay.handle_api)
         
-        runner = web.AppRunner(web_app); await runner.setup(); site = web.TCPSite(runner, '127.0.0.1', 8080); await site.start()
-        self.log("✅ OBS 网页服务器已启动")
+        runner = web.AppRunner(web_app); await runner.setup()
+        # 端口自动顺延：8080 被别的程序占着时，依次试 8081~8090，
+        # 并把实际端口写回 state.overlay_port 供 GUI 复制挂件地址用。
+        bound = None
+        for port in range(8080, 8091):
+            try:
+                site = web.TCPSite(runner, '127.0.0.1', port); await site.start(); bound = port; break
+            except OSError as e:
+                import errno as _errno
+                if e.errno in (_errno.EADDRINUSE, 10048):   # 10048 = Windows 端口被占
+                    self.log(f"[INFO] 端口 {port} 已被占用，尝试下一个...")
+                    continue
+                self.log(f"❌ OBS 服务器启动失败: {type(e).__name__}: {e}"); break
+        if bound is None:
+            self.log("❌ 8080~8090 全部不可用，OBS 挂件无法启动（点歌播放不受影响）")
+        else:
+            state.overlay_port = bound
+            if bound != 8080:
+                self.log(f"⚠️ 默认端口 8080 被占用，已自动改用 {bound}，OBS 源地址请用 http://127.0.0.1:{bound}/")
+            self.log("✅ OBS 网页服务器已启动")
         musiclib.load_quota_state()   # 第5步：跨重启恢复当日配额记账（跨日自动归零）
         self.init_audio_engine()
 

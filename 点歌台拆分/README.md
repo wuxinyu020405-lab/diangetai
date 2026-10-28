@@ -1,64 +1,70 @@
-# 扫码点歌台（拆分版）
+# 扫码点歌台 v1.0（拆分版）
 
-由单文件 `扫码点歌台_优化首次成功_4.py`（2170 行）按子系统拆成 10 个模块。
-**纯搬家**：逻辑、算法、文案、HTML 模板、注释全部逐字保留，未修复任何已知缺陷。
+B 站直播间弹幕点歌 + OBS 可视化一体化工具。观众发「点歌 歌名」，程序自动
+搜索 QQ 音乐 → 下载 → 播放，OBS 画面实时显示队列与滚动歌词；点歌间隙自动
+恢复主播本地 BGM（SMTC 控制）。
+
+由单文件 `扫码点歌台_优化首次成功_4.py` 拆分而来（原版已归档在 git 历史首
+个基线提交），拆分后又落地了三批需求改造：串行点歌、两档音质、本地优先、
+配额熔断、失败归因、端口顺延、pywebview 登录、customtkinter 界面。
+**v1.0 已经朋友实机验证通过（2026-10-28）。**
 
 ## 运行
 
 ```powershell
 cd D:\点歌台干活处
 .\.venv\Scripts\Activate.ps1
-python 点歌台拆分\main.py
+python 点歌台拆分\main.py            # 首次需在"账号登录"页扫码 B站 + QQ音乐
+python 点歌台拆分\main.py --selftest # 自检：依赖/WebView2/内嵌浏览器逐项体检
 ```
 
-配置文件仍读 `点歌台拆分\config.json`、`点歌台拆分\credential.json`（相对各模块所在目录）。
-若要复用现有配置，把 `D:\点歌台干活处\config.json`、`credential.json`、`music_cache\`
-放到 `main.py` 同级目录，或改 `settings.py` 里的 `BASE_DIR`。
+配置读 `点歌台拆分\config.json`、`credential.json`，音频缓存 `music_cache\`，
+配额记账 `quota_state.json`（均相对程序目录；打包版在 exe 同级）。
 
 ## 模块划分
 
-| 文件 | 职责 | 原行号 |
-| --- | --- | --- |
-| `main.py` | 程序入口 | 2159–2171 |
-| `mainapp.py` | `MusicApp`：tkinter 控制台 + asyncio worker 编排 | 1266–2113 |
-| `danmaku.py` | `BiliHandler`、`search_and_add`：弹幕指令解析与入队 | 2115–2156 |
-| `overlay.py` | OBS 浏览器源：HTML 模板 + `/`、`/api/data` 路由 | 784–1263 |
-| `musiclib.py` | QQ 音乐取址/音质枚举探测、缓存文件管理、搜索/URL 解析 | 191–410 等 |
-| `smtc.py` | 从 QQ 音乐窗口标题兜底读取正在播放 | 448–475 |
-| `browserlogin.py` | Selenium 扫码登录 B 站 / QQ 音乐 | 516–762 |
-| `settings.py` | 路径/配置合并/音质映射表/凭据存取/客户端探测 | 59–182 等 |
-| `lyrics.py` | LRC 解析、歌词窗口计算 | 411–446 |
-| `state.py` | 15 个跨模块运行时状态 | 81–189 |
+| 文件 | 职责 |
+| --- | --- |
+| `main.py` | 入口 + `--selftest` 自检 + .NET 运行时定位（coreclr/DOTNET_ROOT） |
+| `mainapp.py` | `MusicApp`：customtkinter 控制台 + asyncio worker 编排 + 下载主流程 |
+| `danmaku.py` | 弹幕指令解析（点歌/切歌）+ 串行点歌 worker（就绪才入列） |
+| `overlay.py` | OBS 浏览器源：单页 HTML + `/`、`/lyric`、`/playing`、`/queue`、`/api/data` |
+| `musiclib.py` | QQ 音乐取址/枚举探测、缓存管理、失败归因、配额记账（跨重启） |
+| `settings.py` | 路径/配置合并/两档音质链/凭据存取/浏览器与驱动版本探测 |
+| `browserlogin.py` | pywebview（WebView2）内嵌扫码登录 B站 / QQ音乐，无残留进程 |
+| `ui_ctk.py` | customtkinter 界面（7 个标签页），只写配置不写业务 |
+| `lyrics.py` | LRC 解析、当前行窗口计算 |
+| `smtc.py` | 兜底：从 QQ 音乐窗口标题读正在播放 |
+| `state.py` | 跨模块运行时状态（一律 `state.xxx` 属性访问，不用裸 global） |
 
-## 关键改动：全局状态访问方式
+## 关键行为
 
-原文件用模块级 `global`，拆成多文件后 `from state import x` 只是值快照，
-对被整体重新赋值的变量（`current_song = None` 等）不会回传。因此所有跨模块引用
-改为**属性访问** `state.xxx` / `settings.xxx` / `musiclib.xxx`：
+- **端口顺延**：OBS 服务从 8080 起试到 8090，实际端口写入 `state.overlay_port`，
+  GUI 四个"复制挂件地址"按钮点击时读它；日志提示改用哪个端口。
+- **串行点歌**：弹幕只进 `pending_requests`，单 worker 逐首出结论（就绪/缓存/
+  配额拦截/失败原因），下载成功或缓存命中才进 `playlist`。
+- **两档音质**：`flac → 默认` 降级链；旧配置值 master/hires 自动归一为 flac。
+- **配额熔断**：日下载上限 150；连续 5 首配额类失败熔断 10 分钟（缓存中的歌
+  仍可播）；记账持久化 `quota_state.json`，跨自然日归零。
+- **单首预算**：45s，档位/重试/流式写盘三级检查，超时放弃整首不烧队列。
+- **半包防护**：下载写 `.part` 完成后原子改名；启动清理 >10min 孤儿 `.part`。
+- **BGM 让位**：点歌开始 SMTC 暂停本地播放，队列清空自动恢复（`local⇄api` 两态）。
+- **启动兜底**：后台线程任何异常写进 GUI 日志 + 落盘 `启动日志.txt`，不静默卡死。
 
-```python
-# 原
-global current_song; current_song = playlist.pop(0)
-# 拆分后
-state.current_song = state.playlist.pop(0)
+## 已知缺陷（v1.0 未修，记录在案）
+
+- OBS 队列/静态歌词用 `innerHTML` 拼接，歌名或观众名含 HTML 标签会注入渲染
+  （仅本地挂件画面，无 cookie 泄露面）；滚动歌词路径用 `textContent`，安全。
+- LRC 重复时间戳行（`[a][b]文本`）第二个标记会当正文显示；`[..]//注释` 会显示。
+- 启动时 `clean_corrupted_files` 在 mixer init 前调用，损坏校验分支不执行
+  （只按体积清残片，行为可接受）；伴随一条无害的 SDL `can't open file` 输出。
+- 无点歌去重/队列上限/按用户频控（串行 + 配额已天然限速）。
+
+## 打包
+
+```powershell
+python -m PyInstaller 点歌台拆分\点歌台.spec --noconfirm --distpath dist --workpath build
 ```
 
-残留的 `global` 声明是原代码文本的一部分（纯搬家未删），现已是无害装饰——真正的读写都走 `state.`。
-
-## 验证（四道，均通过）
-
-1. **AST 等价**：把 `state.`/`settings.` 等前缀还原后，25 个函数/类 + 24 个顶层常量与原文件逐个 AST 一致；HTML 模板 18708 字节逐字节相同 → 证明逻辑零改动。
-2. **静态 lint**：10 个文件无任何"裸引用跨模块名"，排除 import 期/调用期 NameError。
-3. **行为烟测**：跨模块赋值→读取可见、`skip_event` set/clear、歌词链路、OBS 服务真实起停、全模块导入。
-4. **真实启动对比**：原版与拆分版同条件各起一个隔离进程，`/api/data` 的 5 个字段、`style`(1088 字节)、HTML(sha256 相同) 全部逐项相等。
-
-## 未做的事
-
-- 未修复审阅报告里任何缺陷（音质 Hi-Res 失效、XSS、BGM 不恢复等原样保留）。
-- 未改文件名/日志文案；`import ply/jsonpath_ng`（PyInstaller hiddenimports 所需）与两处未使用的 `subprocess/urllib.parse` 按"纯搬家"原则保留，均加了注释。
-- 未做端到端联网测试（连真实直播间/下载真实歌曲），需要有效凭据与桌面音频环境，由你在本机跑 `main.py` 验证。
-
-## 打包提示
-
-原 `.spec` 入口从 `扫码点歌台_优化首次成功.py` 改为 `点歌台拆分\main.py`，
-`hiddenimports` 里的 `ply/jsonpath_ng/pygame` 保持不变，并新增对 `mainapp/danmaku/overlay/musiclib/settings/state/lyrics/smtc/browserlogin` 的收集（PyInstaller 一般能自动跟进，若漏则加入 hiddenimports）。
+产物 `dist\点歌台\`（onedir，约 278MB，内置 .NET 6 运行时，目标机免装）。
+必须整个文件夹分发，只拷 exe 必然打不开。踩坑史与发布包构成见根目录 `打包说明.md`。

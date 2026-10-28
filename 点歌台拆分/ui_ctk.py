@@ -115,10 +115,12 @@ def build(app, root):
         ("正在播放", "/playing", ("#334155", "#1E293B")),
         ("点歌列表", "/queue", ("#334155", "#1E293B")),
     ]:
-        url = f"http://127.0.0.1:8080{path}"
+        # 端口在点击时才读 state.overlay_port：8080 被占时程序会自动顺延，
+        # 构建界面那一刻端口还没定，不能提前把 8080 拼死。
         ctk.CTkButton(src_bar, text=text, width=76, height=30, corner_radius=8,
                       fg_color=color, hover_color=ACCENT, font=_font(11),
-                      command=lambda u=url: app.copy_to_clipboard(u)).pack(side="left", padx=3)
+                      command=lambda p=path: app.copy_to_clipboard(
+                          f"http://127.0.0.1:{state.overlay_port}{p}")).pack(side="left", padx=3)
 
     # ── 标签页（标准 CTkTabview，不做自定义切换优化）──
     name_log = "运行日志"

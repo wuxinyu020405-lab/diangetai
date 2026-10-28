@@ -64,7 +64,9 @@ style_config = {
     "max_cache_size_mb": 500
 }
 
-current_play_mode = "local" 
+overlay_port = 8080   # OBS 挂件实际监听端口（8080 被占时自动顺延，GUI 复制地址读这里）
+
+current_play_mode = "local"
 
 is_local_playing = True    
 
