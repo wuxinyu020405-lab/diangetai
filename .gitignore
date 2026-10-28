@@ -42,3 +42,12 @@ _run_gui.log
 
 # UI 改动前备份
 *.bak_before_revert
+
+# 打包产物
+*.spec.bak
+发布_点歌台/
+自用_点歌台/
+点歌台_发给别人.zip
+chromedriver.exe
+msedgedriver.exe
+启动日志.txt

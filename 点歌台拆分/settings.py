@@ -127,6 +127,75 @@ def get_default_browser_path():
             return ("chrome", p)
     return None
 
+
+def get_browser_version(exe_path):
+    """读取浏览器 exe 的主版本号（如 Edge 156.x → "156"）。失败返回 None。
+    用于判断本地驱动与浏览器是否匹配——版本不匹配时驱动会拒绝连接。"""
+    if not exe_path or not os.path.exists(exe_path):
+        return None
+    import subprocess
+    try:
+        # PowerShell 读文件版本，比 WMI 快且不需要管理员
+        cmd = ('(Get-Item -LiteralPath "%s").VersionInfo.ProductVersion' % exe_path)
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
+                           capture_output=True, text=True, timeout=15)
+        out = (r.stdout or "").strip()
+        if out:
+            return out.split(".")[0]
+    except Exception:
+        pass
+    return None
+
+
+def get_driver_version(driver_path):
+    """运行 `驱动 --version` 读取驱动主版本号。失败返回 None。"""
+    if not driver_path or not os.path.exists(driver_path):
+        return None
+    import subprocess
+    try:
+        r = subprocess.run([driver_path, "--version"],
+                           capture_output=True, text=True, timeout=15)
+        text = (r.stdout or "") + (r.stderr or "")
+        # 形如 "Microsoft Edge WebDriver 155.0.4283.62 (...)" 或 "ChromeDriver 156.0.8078.73"
+        for token in text.replace("(", " ").replace(")", " ").split():
+            if token[:1].isdigit() and "." in token:
+                return token.split(".")[0]
+    except Exception:
+        pass
+    return None
+
+
+def check_driver_match(driver_type, driver_path):
+    """校验本地驱动与浏览器主版本是否一致。
+    返回 (是否可用, 说明文字)。不匹配时明确告知该换驱动。"""
+    exe = None
+    b = get_default_browser_path()
+    if b and b[0] == driver_type:
+        exe = b[1]
+    bv = get_browser_version(exe) if exe else None
+    dv = get_driver_version(driver_path)
+    if dv is None:
+        return False, f"驱动无法读取版本({os.path.basename(driver_path)})"
+    if bv is None:
+        return True, f"驱动 v{dv}，浏览器版本未知（放行尝试）"
+    if bv == dv:
+        return True, f"驱动 v{dv} 与浏览器 v{bv} 匹配"
+    return False, (f"驱动 v{dv} 与浏览器 v{bv} 不匹配——"
+                   f"请删除旧的 {os.path.basename(driver_path)}，"
+                   f"下载 v{bv} 版本驱动放到程序目录")
+
+
+def save_startup_log(text, filename="启动日志.txt"):
+    """把启动/登录过程的重要信息落盘，便于用户把日志发回排错。
+    --windowed 打包后看不到控制台，只有落盘才可能收集到现场。"""
+    try:
+        p = os.path.join(BASE_DIR, filename)
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(text)
+        return p
+    except Exception:
+        return None
+
 def save_credential(cred):
     with open(CREDENTIAL_FILE, "w", encoding="utf-8") as f: json.dump({"musicid": cred.musicid, "musickey": cred.musickey}, f)
 

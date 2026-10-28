@@ -9,6 +9,7 @@ import urllib.request
 import time
 import json
 import os
+import sys
 import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
@@ -26,7 +27,10 @@ def start_driver(log_fn=None):
     究竟是驱动版本不匹配、驱动缺失还是浏览器缺失；--windowed 打包下 print 是看不到的，
     因此必须走 app_instance.log 才能让用户看到真正报错。
     """
+    logs = []   # 收集本次启动的全部日志，失败时落盘给用户排错
+
     def _log(msg):
+        logs.append(str(msg))
         if log_fn:
             try:
                 log_fn(msg)
@@ -93,16 +97,32 @@ def start_driver(log_fn=None):
 
     if not browser:
         _log("[WARN] 未在常见安装路径找到 Edge/Chrome，将尝试由 Selenium Manager 自动处理。")
-    _log("[INFO] Edge 本地驱动: " + ("已找到" if os.path.exists(edge_driver_path) else "未放置") +
-         " | Chrome 本地驱动: " + ("已找到" if os.path.exists(chrome_driver_path) else "未放置"))
+    else:
+        _log(f"[INFO] 找到浏览器: {browser[0]} ({browser[1]})")
 
-    # 尝试顺序：Edge 本地驱动 -> Edge 自动管理 -> Chrome 本地驱动 -> Chrome 自动管理
+    # ── 本地驱动版本校验（关键：版本不匹配是"打不开浏览器"的首要原因）──
+    edge_ok = os.path.exists(edge_driver_path)
+    chrome_ok = os.path.exists(chrome_driver_path)
+    if edge_ok:
+        ok, detail = settings.check_driver_match("edge", edge_driver_path)
+        _log("[INFO] Edge 本地驱动: " + detail)
+        edge_ok = ok
+    else:
+        _log("[INFO] Edge 本地驱动: 未放置")
+    if chrome_ok:
+        ok, detail = settings.check_driver_match("chrome", chrome_driver_path)
+        _log("[INFO] Chrome 本地驱动: " + detail)
+        chrome_ok = ok
+    else:
+        _log("[INFO] Chrome 本地驱动: 未放置")
+
+    # 尝试顺序：匹配的本地驱动 → 自动管理
     plans = [
-        ("Edge(本地驱动)", os.path.exists(edge_driver_path),
+        ("Edge(本地驱动)", edge_ok,
          lambda: webdriver.Edge(service=EdgeService(executable_path=edge_driver_path), options=make_edge_opts())),
-        ("Edge(自动管理)", True,
+        ("Edge(自动管理)", bool(browser and browser[0] == "edge") or True,
          lambda: webdriver.Edge(options=make_edge_opts())),
-        ("Chrome(本地驱动)", os.path.exists(chrome_driver_path),
+        ("Chrome(本地驱动)", chrome_ok,
          lambda: webdriver.Chrome(service=ChromeService(executable_path=chrome_driver_path), options=make_chrome_opts())),
         ("Chrome(自动管理)", True,
          lambda: webdriver.Chrome(options=make_chrome_opts())),
@@ -110,9 +130,11 @@ def start_driver(log_fn=None):
 
     last_err = None
     last_err_type = "None"
+    tried = []
     for name, available, fn in plans:
         if not available:
             continue
+        tried.append(name)
         try:
             drv = fn()
             _log("[OK] 已通过 " + name + " 成功启动浏览器。")
@@ -120,9 +142,57 @@ def start_driver(log_fn=None):
         except Exception as e:
             last_err = e
             last_err_type = type(e).__name__
-            _log("[WARN] " + name + " 启动失败: " + last_err_type + ": " + str(e))
+            _log("[WARN] " + name + " 启动失败: " + last_err_type + ": " + str(e).split("\n")[0][:200])
 
-    _log("[ERR] 所有浏览器启动方式均失败，最后错误: " + last_err_type + ": " + str(last_err))
+    # ── 全部失败：给出人话指引，而不是异常堆栈 ──
+    _log("[ERR] 所有浏览器启动方式均失败")
+    _log("")
+    _log("══════════ 浏览器启动失败，请按以下步骤处理 ══════════")
+    if not browser:
+        _log("① 你的电脑没有装 Edge 或 Chrome。")
+        _log("   请先安装其中一个（Win10/11 一般自带 Edge）。")
+    else:
+        _log(f"① 已检测到 {browser[0]}，但驱动无法启动它。")
+        bv = settings.get_browser_version(browser[1])
+        if bv:
+            _log(f"   你的浏览器主版本: v{bv}")
+            _log(f"   请下载 **v{bv}.x.x.x** 版本的驱动（版本号前两段要一致即可）")
+            _log("   放到本程序(exe)所在目录，文件名必须是:")
+            if browser[0] == "edge":
+                _log("     msedgedriver.exe")
+                _log("   下载入口（官方页面，选与你版本最接近的一条）:")
+                _log("     https://developer.microsoft.com/microsoft-edge/tools/webdriver/")
+                _log(f"     直链格式: https://msedgedriver.microsoft.com/{bv}.0.<补丁号>.<次版本>/edgedriver_win64.zip")
+            else:
+                _log("     chromedriver.exe")
+                _log("   下载入口（Chrome for Testing 官方页面）:")
+                _log("     https://googlechromelabs.github.io/chrome-for-testing/")
+                _log(f"     选版本号以 {bv}. 开头的那一行，平台 win64")
+    _log("② 放好驱动后，重启本程序再点登录。")
+    _log("③ 若仍失败，把程序目录下的『启动日志.txt』发给开发者。")
+    _log("═══════════════════════════════════════════════════")
+
+    # 落盘日志（--windowed 下看不到控制台，这是唯一能收集现场的方式）
+    try:
+        body = "\n".join([
+            "启动时间: " + time.strftime("%Y-%m-%d %H:%M:%S"),
+            "程序目录: " + settings.BASE_DIR,
+            "冻结环境: " + str(getattr(sys, 'frozen', False)),
+            "Python: " + sys.version,
+            "",
+            "浏览器检测: " + (str(browser) if browser else "未找到"),
+            "Edge 驱动存在: " + str(os.path.exists(edge_driver_path)),
+            "Chrome 驱动存在: " + str(os.path.exists(chrome_driver_path)),
+            "尝试过的方案: " + ", ".join(tried),
+            "最后错误类型: " + last_err_type,
+            "最后错误内容: " + (str(last_err).split(chr(10))[0][:500] if last_err else ""),
+            "",
+            "── 完整尝试日志 ──",
+        ] + logs)
+        settings.save_startup_log(body)
+        _log(f"[INFO] 已写出排错日志: {os.path.join(settings.BASE_DIR, '启动日志.txt')}")
+    except Exception:
+        pass
     return None
 
 # ================= B站 与 QQ音乐 登录 =================
