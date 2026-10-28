@@ -120,10 +120,7 @@ def build(app, root):
                       fg_color=color, hover_color=ACCENT, font=_font(11),
                       command=lambda u=url: app.copy_to_clipboard(u)).pack(side="left", padx=3)
 
-    # ── 标签页（自建：切换只 hide/show，无重建开销）──
-    # CTkTabview 是懒构建——首次切到某页要现场建控件（实测综合/纯歌词/列表
-    # 各需 250~350ms，合计 1135ms），这就是"切换卡顿"的来源。
-    # 这里改为：启动时把所有页面一次建完，切换只做 pack_forget/pack。
+    # ── 标签页（标准 CTkTabview，不做自定义切换优化）──
     name_log = "运行日志"
     name_acct = "账号登录"
     name_basic = "音质缓存"
@@ -133,48 +130,22 @@ def build(app, root):
     name_queue = "点歌列表"
     PAGE_NAMES = [name_log, name_acct, name_basic, name_mix, name_lyric, name_play, name_queue]
 
-    nav = ctk.CTkFrame(root, fg_color="transparent", height=42)
-    nav.pack(fill="x", padx=12, pady=(10, 0))
-    nav.pack_propagate(False)
-    body = ctk.CTkFrame(root, corner_radius=10, fg_color=("#FFFFFF", "#0B1220"))
-    body.pack(fill="both", expand=True, padx=12, pady=(6, 6))
-
-    pages = {}
+    tabs = ctk.CTkTabview(
+        root,
+        corner_radius=10,
+        fg_color=("#FFFFFF", "#0B1220"),
+        segmented_button_fg_color=("#E2E8F0", "#1E293B"),
+        segmented_button_selected_color=ACCENT,
+        segmented_button_selected_hover_color=ACCENT,
+        segmented_button_unselected_color=("#E2E8F0", "#1E293B"),
+        segmented_button_unselected_hover_color=("#CBD5E1", "#334155"),
+        text_color=("#0F172A", "#E2E8F0"),
+    )
+    tabs.pack(fill="both", expand=True, padx=12, pady=(10, 6))
     for n in PAGE_NAMES:
-        # 全部页面始终 grid 在同一个格子、保持映射状态，切换只用 tkraise 改层级。
-        # 这样完全不触发子控件重排/重绘（实测 grid_remove→grid 每页 180~880ms，
-        # tkraise 为个位数 ms）。
-        p = ctk.CTkFrame(body, fg_color="transparent")
-        p._page_name = n     # 标记：供测试与排障识别（不影响运行）
-        pages[n] = p
-    body.grid_rowconfigure(0, weight=1)
-    body.grid_columnconfigure(0, weight=1)
-    for n in PAGE_NAMES:
-        pages[n].grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-    nav_buttons = {}
-    current = {"name": None}
-    # 供外部/测试查询当前页
-    app._page_names = list(PAGE_NAMES)
-    app._pages = pages
-    app._current_page = lambda: current["name"]
+        tabs.add(n)
 
-    def show(name):
-        # 不做 early-return：即便目标已在上层，也把按钮高亮重刷一遍，
-        # 避免"current 与真实堆叠不同步"导致点击无反馈。
-        # 代价是一次 tkraise + 7 次 configure（实测 <2ms），换来状态绝对可靠。
-        pages[name].tkraise()      # 只改堆叠顺序，不动布局
-        for n, b in nav_buttons.items():
-            b.configure(fg_color=ACCENT if n == name else ("#E2E8F0", "#1E293B"),
-                        text_color=("#FFFFFF", "#F8FAFC") if n == name else ("#334155", "#CBD5E1"))
-        current["name"] = name
-
-    for n in PAGE_NAMES:
-        b = ctk.CTkButton(nav, text=n, width=100, height=32, corner_radius=8,
-                          font=_font(12), fg_color=("#E2E8F0", "#1E293B"),
-                          text_color=("#334155", "#CBD5E1"), hover_color=ACCENT,
-                          command=lambda nm=n: show(nm))
-        b.pack(side="left", padx=(0, 6))
-        nav_buttons[n] = b
+    pages = {n: tabs.tab(n) for n in PAGE_NAMES}
 
     def scroller(page):
         # 不用 CTkScrollableFrame（每次切换要重算滚动区域，首建也慢）。
@@ -581,17 +552,9 @@ def build(app, root):
     ctk.CTkLabel(bottom, text="OBS 源: http://127.0.0.1:8080",
                  font=_font(11), text_color=MUTED).pack(side="right", padx=14)
 
-    # 预热：快速把每页 tkraise 一次，只为触发首次布局计算。
-    # 不做 root.update()（那会强制整窗重绘，实测把启动拖到 5 秒）；
-    # update_idletasks 足够让 CTk 完成内部布局，启动可压到 2 秒内。
-    # ⚠️ 必须用 tkraise，不可用 grid_remove/grid（后者卸载页面会让 tkraise 失效）。
-    try:
-        for n in PAGE_NAMES:
-            pages[n].tkraise()
-            root.update_idletasks()
-    except Exception:
-        pass
-    show(name_log)
+    # 首屏固定在日志页（CTkTabview 默认停在最后添加的那一页）
+    tabs.set(name_log)
+
 
 
 def set_label(widget, text=None, color=None, bg=None):

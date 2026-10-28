@@ -39,3 +39,6 @@ _chk.js
 _run_gui.log
 *.bak_ui
 *.bak_before_2line
+
+# UI 改动前备份
+*.bak_before_revert
