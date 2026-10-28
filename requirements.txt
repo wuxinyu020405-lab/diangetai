@@ -6,7 +6,7 @@
 #   .venv\Scripts\activate
 #   pip install -r requirements.txt --only-binary=:all:
 #   pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
-#   pip install "pywebview @ https://github.com/r0x7/pywebview/archive/refs/heads/master.tar.gz"
+#   pip install "pywebview @ https://github.com/r0x0r/pywebview/archive/refs/heads/master.tar.gz"
 #
 # ── 为什么 blivedm 要单独用 --no-deps 装 ─────────────────────────────
 #   源码用的是 blivedm 老 API：BLiveClient.set_handler + 同步 _on_danmaku。
@@ -15,11 +15,13 @@
 #   - 只有 GitHub master（v1.1.7）仍是 set_handler + 同步 handler。
 #   - 实测 master 在 aiohttp 3.14.5 + brotli 1.2.1 下正常，故 --no-deps 安装。
 #
-# ── 为什么 pywebview 从 GitHub master 装 ─────────────────────────────
-#   登录用 pywebview 内嵌 WebView2（替代已废弃的 Selenium）。
-#   开发机当前 venv 装的是本地 master 快照（版本显示 0.0.0，原目录已不在）。
-#   PyPI 的 6.2.1 同为 6.x 系，接口一致，但打包验证过的是 master——
-#   重建环境后请先跑 `python 点歌台拆分\main.py --selftest` 确认登录组件可用。
+# ── 为什么 pywebview 必须从 GitHub master 装（重要！）─────────────────
+#   PyPI 的 6.2.1 缺少 PR #1832 的 coreclr/WinForms 修复，运行时报
+#   System.Windows.Forms.ContextMenu / Python.Runtime.Loader / SystemEvents
+#   三类错误之一，登录窗口直接挂（详见 打包说明.md 坑4）。
+#   API 表面（get_cookies 等）6.2.1 与 master 一致，静态检查看不出问题，
+#   必须实跑 --selftest 才能暴露 —— 别把它换回 PyPI 版。
+#   本机网络到 GitHub 不通时：先手动下载 tar.gz 再 pip install 本地路径。
 #
 # ── winsdk 注意 ───────────────────────────────────────────────────────
 #   winsdk 是预发布版，wheel 最高 cp312 → 本项目固定 Python 3.12。

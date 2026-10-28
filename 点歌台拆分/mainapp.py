@@ -14,6 +14,7 @@ import winsdk.windows.media.control as wmc
 import blivedm
 import json
 import os
+import sys
 import pygame
 from qqmusic_api import Client, Credential
 import browserlogin
@@ -25,6 +26,8 @@ import settings
 import smtc
 import state
 import ui_ctk
+import updater
+import version
 
 
 class _BudgetExceeded(Exception):
@@ -46,11 +49,13 @@ class MusicApp:
 
         self.audio_backend = "none"
 
-        self.root.title(f"控制台 - 房间 {self.config.get('room_id', '未配置')}"); self.root.geometry("780x880")
+        self.root.title(f"控制台 - 房间 {self.config.get('room_id', '未配置')} - {version.DISPLAY}"); self.root.geometry("780x880")
+        self._set_window_icon()
         self.setup_ui()
         self.download_tasks = {}
         self.last_download_reason = None   # 需求9：单行结论的失败归因标记
         self.thread = threading.Thread(target=self.start_async_loop, daemon=True); self.thread.start()
+        updater.start_background_check(self)   # 启动 20s 后静默检查一次更新
 
     def init_audio_engine(self):
         try:
@@ -62,6 +67,17 @@ class MusicApp:
             self.audio_backend = "none"
             self.log(f"❌ 音频通道初始化失败: {e}")
             self.update_engine_badge("❌ 音频驱动未就绪", "#C62828")
+
+    def _set_window_icon(self):
+        """标题栏/Alt+Tab 图标。打包版从 _MEIPASS 取（spec 已带 app.ico），
+        源码版从模块目录取。找不到就安静跳过，用系统默认图标。"""
+        try:
+            base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+            ico = os.path.join(base, "app.ico")
+            if os.path.exists(ico):
+                self.root.iconbitmap(ico)
+        except Exception as e:
+            print(f"[WARN] 窗口图标设置失败: {e}")
 
     def update_engine_badge(self, text, color):
         def _update():

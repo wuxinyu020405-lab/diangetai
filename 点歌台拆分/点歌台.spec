@@ -17,6 +17,51 @@ datas = []
 binaries = []
 hiddenimports = []
 
+# ── 版本单一来源：读同目录 version.py（exe 版本资源与运行时显示永不漂移）──
+import importlib.util as _ilu
+_vk = _ilu.spec_from_file_location("_version", os.path.join(SPECPATH, "version.py"))
+_vmod = _ilu.module_from_spec(_vk); _vk.loader.exec_module(_vmod)
+APP_VERSION = _vmod.VERSION                      # "1.0.0"
+APP_TUPLE = tuple(_vmod.VERSION_TUPLE)           # (1, 0, 0, 0)
+
+_version_file = os.path.join(SPECPATH, "version_info.txt")
+with open(_version_file, "w", encoding="utf-8") as _f:
+    _f.write("""# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={t},
+    prodvers={t},
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([StringTable('080404B0', [
+      StringStruct('FileDescription', '扫码点歌台（B站弹幕点歌 + OBS 挂件）'),
+      StringStruct('FileVersion', '{v}'),
+      StringStruct('InternalName', 'DianGeTai'),
+      StringStruct('LegalCopyright', 'MIT License'),
+      StringStruct('OriginalFilename', '点歌台.exe'),
+      StringStruct('ProductName', '扫码点歌台'),
+      StringStruct('ProductVersion', '{v}'),
+    ])]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])])
+  ]
+)
+""".format(t=APP_TUPLE, v=APP_VERSION))
+print(f"[spec] 版本资源: {APP_VERSION} {APP_TUPLE} -> version_info.txt")
+
+# 应用图标（_gen_icon.py 生成；同时作为 datas 带进去供 tkinter 设窗口图标）
+APP_ICON = os.path.join(SPECPATH, "app.ico")
+if os.path.exists(APP_ICON):
+    datas.append((APP_ICON, "."))
+else:
+    APP_ICON = None
+    print("[spec][WARN] 未找到 app.ico，exe 将无自定义图标")
+
 # ── 需要完整收集的包 ──────────────────────────────────────────────
 # qqmusic_api: 大量动态导入（algorithms/models/modules）+ 可能带数据文件
 # customtkinter: 必须带 assets（字体/主题 JSON），否则界面起不来
@@ -125,6 +170,7 @@ hiddenimports += [
 hiddenimports += [
     "state", "settings", "lyrics", "musiclib", "overlay",
     "smtc", "browserlogin", "danmaku", "mainapp", "ui_ctk",
+    "version", "updater",
 ]
 
 # ── 运行期需要的非代码文件 ────────────────────────────────────────
@@ -166,7 +212,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon=APP_ICON,               # 麦克风图标（_gen_icon.py 生成）
+    version=_version_file,       # exe 属性页的版本信息（与 version.py 同源）
 )
 
 coll = COLLECT(
@@ -182,7 +229,8 @@ coll = COLLECT(
 # 登录用 pywebview + WebView2，走 coreclr 需要 .NET 运行时；
 # 普通用户机器通常没有 .NET 6+ → 必须自包含（微软官方 self-contained 做法）。
 # 目录布局必须与真实 dotnet 安装一致，hostfxr 依赖它来定位共享框架。
-_DOTNET_VER = "6.0.36"
+# 版本可被 CI 覆盖：DIANGETAI_DOTNET_VER（本机默认 6.0.36）
+_DOTNET_VER = os.environ.get("DIANGETAI_DOTNET_VER", "6.0.36")
 _DOTNET_SRC = r"C:\Program Files\dotnet"
 _dist = os.path.join(DISTPATH, "点歌台")
 _dst = os.path.join(_dist, "dotnet")

@@ -51,3 +51,10 @@ _run_gui.log
 chromedriver.exe
 msedgedriver.exe
 启动日志.txt
+
+# v1.0 开源化新增的生成物
+installer_out/
+点歌台拆分/version_info.txt
+_build*.log
+*.tmp
+

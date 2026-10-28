@@ -1,0 +1,139 @@
+# 发版流水线：打 tag v* → 构建 exe 目录包 + Inno 安装包 → 挂到 GitHub Release
+# 版本单一来源：点歌台拆分/version.py（tag 必须与之一致，否则直接失败）
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}          # 手动触发：出"测试构建"产物，不发 Release
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"        # winsdk 只有 ≤cp312 的 wheel，勿升
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --only-binary=:all:
+          pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
+          pip install "pywebview @ https://github.com/r0x0r/pywebview/archive/refs/heads/master.tar.gz"
+
+      - name: 校验 pywebview 是 master（PyPI 6.2.1 缺 PR#1832，登录必挂）
+        shell: python
+        run: |
+          import importlib.metadata as m
+          import sys
+          try:
+              v = m.version("pywebview")
+          except Exception:
+              print("::error::pywebview 未安装"); sys.exit(1)
+          print("pywebview 版本:", v)
+          if v == "6.2.1":
+              print("::error::装到了 PyPI 6.2.1，登录功能会挂，必须用 GitHub master"); sys.exit(1)
+
+      - name: 校验 tag 与 version.py 一致
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path '点歌台拆分\version.py' -Pattern '^VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          if ($tag -ne $ver) { Write-Error "tag v$tag != version.py $ver，拒绝发布"; exit 1 }
+          "VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 预装 .NET 6 桌面运行时（spec 结尾段会自动复制进包）
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+          dotnet-quality: "ga"
+
+      - name: 探测实际 .NET 版本并传给 spec
+        shell: pwsh
+        run: |
+          $root = if (Test-Path "C:\Program Files\dotnet\shared\Microsoft.WindowsDesktop.App") { "C:\Program Files\dotnet" } else { "C:\Program Files (x86)\dotnet" }
+          $fw = Get-ChildItem "$root\shared\Microsoft.WindowsDesktop.App" -Directory | Where-Object { $_.Name -like "6.*" } | Select-Object -First 1
+          if (-not $fw) { Write-Error "没找到 WindowsDesktop.App 6.x"; exit 1 }
+          "实际运行时: $root\shared\... $($fw.Name)"
+          "DIANGETAI_DOTNET_VER=$($fw.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "DOTNET_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: PyInstaller 打包
+        run: python -m PyInstaller "点歌台拆分/点歌台.spec" --noconfirm --distpath dist --workpath build
+
+      - name: 校验 dotnet 已随包（登录功能依赖，spec 漏了要立刻知道）
+        shell: pwsh
+        run: |
+          $dst = "dist\点歌台\dotnet"
+          if (-not (Test-Path "$dst\shared\Microsoft.WindowsDesktop.App")) {
+            Write-Error "包内缺 dotnet\shared\Microsoft.WindowsDesktop.App（spec 的复制段没生效）"; exit 1 }
+          Get-ChildItem "$dst\shared" | Select-Object -ExpandProperty Name
+
+      - name: 装 Inno Setup 并编译安装包
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DMyAppVersion=$env:VERSION" "点歌台.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 目录包 zip（免安装备用）
+        shell: pwsh
+        run: Compress-Archive -Path "dist\点歌台\*" -DestinationPath "installer_out\点歌台_v${{ env.VERSION }}_portable.zip" -CompressionLevel Optimal
+
+      - name: 产物自检（exe 版本资源 + 冻结环境模块导入 + 内嵌浏览器）
+        shell: pwsh
+        run: |
+          $v = (Get-Item "dist\点歌台\点歌台.exe").VersionInfo
+          "FileVersion=$($v.FileVersion) ProductName=$($v.ProductName)"
+          if (-not $v.FileVersion) { Write-Error "exe 版本资源缺失"; exit 1 }
+          foreach ($p in 'dist\点歌台\_internal','dist\点歌台\dotnet\shared','installer_out') {
+            if (-not (Test-Path $p)) { Write-Error "缺 $p"; exit 1 }
+          }
+          # 真跑一次 --selftest：冻结环境里 9 个关键模块 + 内嵌浏览器全通才算合格
+          Start-Process "dist\点歌台\点歌台.exe" -ArgumentList '--selftest' -Wait -Timeout 180
+          $rep = Get-Content "dist\点歌台\自检报告.txt" -Encoding UTF8 -Raw
+          $rep | Out-File "$env:GITHUB_WORKSPACE\ci_selftest.txt" -Encoding utf8
+          if ($rep -match 'FAIL|❌') { Write-Error "自检报告含 FAIL：见 ci_selftest.txt"; exit 1 }
+          if ($rep -notmatch '版本: v') { Write-Error "自检报告缺版本行"; exit 1 }
+          "exe 自检通过"
+
+      - name: 安装包冒烟（静默装 → 查文件 → 卸载 → 查残留）
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem "installer_out\*_Setup_v*.exe" | Select-Object -First 1).FullName
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "安装失败 exit=$($p.ExitCode)"; exit 1 }
+          $dst = "$env:LOCALAPPDATA\Programs\DianGeTai"
+          foreach ($f in '点歌台.exe','_internal','dotnet\shared') {
+            if (-not (Test-Path "$dst\$f")) { Write-Error "安装后缺 $f"; exit 1 }
+          }
+          # 卸载并确认凭据类文件清理策略生效（unins000 存在即可，数据删除靠 UninstallDelete）
+          $u = Start-Process "$dst\unins000.exe" -ArgumentList '/VERYSILENT','/NORESTART' -Wait -PassThru
+          if ($u.ExitCode -ne 0) { Write-Error "卸载失败 exit=$($u.ExitCode)"; exit 1 }
+          Start-Sleep 2
+          if (Test-Path "$dst\点歌台.exe") { Write-Error "卸载后 exe 仍在"; exit 1 }
+          "安装包冒烟通过"
+
+      - name: 发布 Release（仅 tag 触发时）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            installer_out/点歌台_Setup_v${{ env.VERSION }}.exe
+            installer_out/点歌台_v${{ env.VERSION }}_portable.zip
+          generate_release_notes: true
+
+      - name: 手动触发时只存工件
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-build
+          path: installer_out/

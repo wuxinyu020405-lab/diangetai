@@ -68,6 +68,74 @@ import settings
 import state
 
 
+# ── 单实例锁 ─────────────────────────────────────────────────────
+# 命名互斥体（会话级，随进程生死，崩溃自动释放，无需清理文件锁）。
+# 二次启动：弹提示并尝试把已有窗口带到前台，然后静默退出。
+# 不锁 = 用户开两个实例 → 端口顺延到 8081 两份弹幕，OBS 源只连其一，
+# 表现为"点歌时灵时不灵"，极难排查。
+_instance_mutex = None
+
+
+def _acquire_single_instance():
+    global _instance_mutex
+    if os.name != "nt":
+        return True   # 非 Windows（开发调试）不锁
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
+    ERROR_ALREADY_EXISTS = 183
+    # Local\ = 当前登录会话内互斥（普通权限可建）。
+    # 不用 Global\：那需要管理员权限，普通用户下 CreateMutex 会失败返回 NULL，
+    # 导致下面的"创建失败→放行"分支触发，锁彻底失效。单实例只需同会话互斥。
+    _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\DianGeTai_SingleInstance_v1")
+    if not _instance_mutex:
+        return True   # 创建失败（如无权限建 Global）→ 放行，宁多不少
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        return False
+    return True
+
+
+def _bring_existing_window_front():
+    """尽力把已运行实例的主窗口置前；找不到就算了，不报错。"""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        SW_RESTORE, SW_SHOW = 9, 5
+        target = None
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
+        def _cb(hwnd, _l):
+            nonlocal target
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, buf, 256)
+            if buf.value.startswith("点歌台控制台"):
+                target = hwnd
+                return False
+            return True
+
+        user32.EnumWindows(_cb, 0)
+        if target:
+            user32.ShowWindow(target, SW_RESTORE)
+            user32.SetForegroundWindow(target)
+    except Exception:
+        pass
+
+
+def _show_already_running():
+    """二次启动时的模态提示。tkinter 独立小进程式用法：
+    隐藏根窗 → messagebox → 销毁。调用方负责随后的 sys.exit。"""
+    import tkinter as _tk
+    from tkinter import messagebox as _mb
+    _r = _tk.Tk()
+    _r.withdraw()
+    _mb.showinfo("点歌台", "点歌台已经在运行了。\n\n已为你切到它的窗口；\n如果看不到，请检查任务栏/系统托盘。")
+    _r.destroy()
+
+
 def launch_main_app(config):
     # 根窗口必须是 ctk.CTk（普通 tk.Tk 不支持 CTk 的配色参数）
     root = ctk.CTk()
@@ -76,7 +144,7 @@ def launch_main_app(config):
 
 
 def run_selftest():
-    """自检模式：验证打包产物完整性（selenium 动态模块、浏览器驱动）。
+    """自检模式：验证打包产物完整性（关键模块导入、WebView2、内嵌浏览器）。
     用法: 点歌台.exe --selftest
     结果同时打印并写入 自检报告.txt，方便用户直接发回排错。"""
     import importlib
@@ -88,6 +156,8 @@ def run_selftest():
         lines.append(str(m))
 
     out("═══ 点歌台 自检报告 ═══")
+    import version as _ver
+    out("版本: " + _ver.DISPLAY)
     out("时间: " + time.strftime("%Y-%m-%d %H:%M:%S"))
     out("程序目录: " + settings.BASE_DIR)
     out("冻结环境(frozen): " + str(getattr(sys, "frozen", False)))
@@ -213,6 +283,15 @@ if __name__ == '__main__':
     if os.path.exists(settings.CONFIG_FILE):
         with open(settings.CONFIG_FILE, "r", encoding="utf-8") as f:
             config_data = json.load(f)
-        launch_main_app(config_data)
     else:
-        launch_main_app({"room_id": "", "bili_cookie": "", "qqmusic_path": ""})
+        config_data = {"room_id": "", "bili_cookie": "", "qqmusic_path": ""}
+
+    if not _acquire_single_instance():
+        _bring_existing_window_front()
+        try:
+            _show_already_running()
+        except Exception:
+            pass   # 无桌面会话等极端情况：静默退出即可
+        sys.exit(0)
+
+    launch_main_app(config_data)

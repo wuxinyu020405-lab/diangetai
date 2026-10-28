@@ -15,6 +15,8 @@ from tkinter import colorchooser, messagebox
 import browserlogin
 import state
 import settings
+import updater
+import version
 
 
 # ── 主题 ────────────────────────────────────────────────────────────
@@ -93,7 +95,7 @@ def build(app, root):
         root.configure(fg_color=("#F1F5F9", "#0F172A"))
     except Exception:
         pass    # 万一传入的是普通 tk.Tk，退化为默认外观而非崩溃
-    root.title(f"点歌台控制台 · 房间 {app.config.get('room_id') or '未配置'}")
+    root.title(f"点歌台控制台 · 房间 {app.config.get('room_id') or '未配置'} · {version.DISPLAY}")
     root.geometry("880x820")
     root.minsize(760, 640)
 
@@ -109,6 +111,16 @@ def build(app, root):
 
     src_bar = ctk.CTkFrame(top, fg_color="transparent")
     src_bar.pack(side="right", padx=12)
+
+    # ── 版本 + 检查更新（pack 顺序在 src_bar 之后 → 显示在其左侧）──
+    upd_bar = ctk.CTkFrame(top, fg_color="transparent")
+    upd_bar.pack(side="right")
+    ctk.CTkLabel(upd_bar, text=version.DISPLAY, font=_font(11), text_color=MUTED).pack(side="left", padx=(0, 6))
+    ctk.CTkButton(upd_bar, text="检查更新", width=64, height=26, corner_radius=8,
+                  fg_color=("white", "#334155"), hover_color=ACCENT, font=_font(11),
+                  text_color=("#334155", "white"),
+                  command=lambda: updater.manual_check(app)).pack(side="left")
+
     for text, path, color in [
         ("综合挂件", "", ("#334155", "#1E293B")),
         ("纯歌词", "/lyric", ("#334155", "#1E293B")),
