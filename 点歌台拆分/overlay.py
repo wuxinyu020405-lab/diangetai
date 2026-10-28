@@ -474,6 +474,15 @@ async function updateData() {
             lc.style.setProperty('--lyric-color', cfg.mixed.color_lyric);
             lc.style.setProperty('--lyric-font-weight', cfg.mixed.bold_lyric ? 'bold' : 'normal');
             applyLyricOpacity(cfg.lyric.opacity, cfg.lyric.line_spacing, lc);   // 第6步·透明度+行距（mixed 共用）
+            // 对齐：mixed 自己有 align，需同时设置 flex 交叉轴变量，
+            // 否则 .lyric-box 的 align-items 会压过 text-align（表现为"改了没反应"）
+            const mAlignNow = cfg.mixed.align || cfg.lyric.align || 'center';
+            const mFlex = {'left': 'flex-start', 'right': 'flex-end', 'center': 'center'}[mAlignNow] || 'center';
+            lc.style.setProperty('--lyric-align', mFlex);
+            lc.style.alignItems = mFlex;
+            lc.style.textAlign = mAlignNow;
+            root.style.setProperty('--lyric-origin', (mAlignNow === 'left') ? 'left center'
+                                   : (mAlignNow === 'right') ? 'right center' : 'center center');
             
             if (cfg.mixed.show_lyric) {
                 lc.classList.remove('hidden-lyric');
