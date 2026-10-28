@@ -7,6 +7,46 @@ import os
 import sys
 import time
 
+# ★ 必须在任何 pywebview / pythonnet 导入之前设置。
+# 打包（PyInstaller）环境下，pythonnet 的默认 netfx 加载器无法从解压临时
+# 目录里解析 Python.Runtime.dll（.NET Framework 程序集加载限制），
+# 报 "Failed to resolve Python.Runtime.Loader.Initialize"。
+# 实测改用 coreclr 即恢复正常（源码运行与打包运行均已验证）。
+os.environ.setdefault("PYTHONNET_RUNTIME", "coreclr")
+
+
+def _setup_dotnet_for_webview():
+    """打包环境下把 .NET Desktop 运行时相关信息准备好。
+
+    pywebview 的 configure_coreclr() 用 __file__ 定位自带 runtimeconfig，
+    但在 PyInstaller 的解压目录（_MEIPASS）里可能取不到正确路径，
+    导致 coreclr 起得来却没有 WindowsDesktop 共享框架 → 报
+    "Could not load file or assembly 'System.Windows.Forms'"。
+
+    这里主动做两件事：
+      ① 指到包内自带的 pywebview-runtimeconfig.json（若存在）
+      ② 设 DOTNET_ROOT 到真实 dotnet 安装位置，让 hostfxr 能找到共享框架
+    """
+    try:
+        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
+        cfg = os.path.join(base, "webview", "lib", "pywebview-runtimeconfig.json")
+        if os.path.exists(cfg):
+            os.environ.setdefault("PYTHONNET_CORECLR_RUNTIME_CONFIG", cfg)
+
+        # DOTNET_ROOT：优先 x64 子目录（ARM64 上的 x64 Python 需要它），
+        # 否则用标准 Program Files\dotnet
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        for cand in (os.path.join(pf, "dotnet", "x64"), os.path.join(pf, "dotnet")):
+            if os.path.isdir(cand):
+                os.environ.setdefault("DOTNET_ROOT", cand)
+                os.environ.setdefault("DOTNET_ROOT_X64", cand)
+                break
+    except Exception:
+        pass
+
+
+_setup_dotnet_for_webview()
+
 import customtkinter as ctk
 
 import mainapp
@@ -101,7 +141,11 @@ def run_selftest():
         res = {"ok": False, "err": None}
 
         def _probe():
+            # ★ pywebview 检查的是"当前线程"的名字，必须在工作线程内部改名
+            cur = threading.current_thread()
+            old = cur.name
             try:
+                cur.name = "MainThread"
                 w = _wv2.create_window("自检", "about:blank", width=400, height=300)
                 def _closer():
                     _t.sleep(4)
@@ -112,8 +156,12 @@ def run_selftest():
                 res["ok"] = True
             except Exception as e:
                 res["err"] = f"{type(e).__name__}: {e}"
+            finally:
+                try:
+                    cur.name = old
+                except Exception:
+                    pass
 
-        _old = threading.current_thread().name
         t = threading.Thread(target=_probe, daemon=True)
         t.start()
         t.join(timeout=30)

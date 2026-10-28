@@ -1,0 +1,365 @@
+182 INFO: PyInstaller: 6.22.3, contrib hooks: 2026.9
+182 INFO: Python: 3.12.10
+208 INFO: Platform: Windows-11-10.0.26300-SP0
+208 INFO: Python environment: D:\点歌台干活处\.venv
+169 WARNING: Failed to collect submodules for 'webview.platforms.android' because importing 'webview.platforms.android' raised: ModuleNotFoundError: No module named 'android'
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+10387 INFO: Module search paths (PYTHONPATH):
+['D:\\点歌台干活处',
+ 'C:\\Users\\14506\\AppData\\Local\\Programs\\Python\\Python312\\python312.zip',
+ 'C:\\Users\\14506\\AppData\\Local\\Programs\\Python\\Python312\\DLLs',
+ 'C:\\Users\\14506\\AppData\\Local\\Programs\\Python\\Python312\\Lib',
+ 'C:\\Users\\14506\\AppData\\Local\\Programs\\Python\\Python312',
+ 'D:\\点歌台干活处\\.venv',
+ 'D:\\点歌台干活处\\.venv\\Lib\\site-packages',
+ 'D:\\点歌台干活处\\点歌台拆分',
+ 'D:\\点歌台干活处']
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+10853 INFO: Appending 'binaries' from .spec
+10857 INFO: Appending 'datas' from .spec
+11010 INFO: checking Analysis
+11094 INFO: Building because excludes changed
+11094 INFO: Looking for Python shared library...
+11094 INFO: Using Python shared library: C:\Users\14506\AppData\Local\Programs\Python\Python312\python312.dll
+11094 INFO: Running Analysis Analysis-00.toc
+11094 INFO: Target bytecode optimization level: 0
+11094 INFO: Initializing module dependency graph...
+11096 INFO: Initializing module graph hook caches...
+11110 INFO: Analyzing modules for base_library.zip ...
+12411 INFO: Processing standard module hook 'hook-encodings.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+12869 INFO: Processing standard module hook 'hook-math.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+13009 INFO: Processing standard module hook 'hook-heapq.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+13682 INFO: Processing standard module hook 'hook-pickle.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+14663 INFO: Caching module dependency graph...
+14697 INFO: Analyzing D:\点歌台干活处\点歌台拆分\main.py
+14735 INFO: Processing standard module hook 'hook-customtkinter.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+14825 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_find_module_path'
+14828 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+15141 INFO: Processing standard module hook 'hook-_tkinter.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15209 INFO: Processing standard module hook 'hook-platform.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15227 INFO: Processing standard module hook 'hook-_ctypes.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+15231 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+15232 INFO: SetuptoolsInfo: initializing cached setuptools info...
+15927 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+16116 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+16241 INFO: Processing standard module hook 'hook-xml.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+17479 INFO: Processing standard module hook 'hook-pydantic.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+18272 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+18303 INFO: Processing standard module hook 'hook-sysconfig.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+19293 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+19295 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+19299 INFO: Processing standard module hook 'hook-setuptools.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+19311 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+19334 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+19335 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+19353 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+19354 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+19461 INFO: Processing standard module hook 'hook-_osx_support.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+19716 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+19718 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+20125 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+20127 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+20610 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+20610 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+21519 INFO: Processing standard module hook 'hook-pygame.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\pygame\\__pyinstaller'
+21936 INFO: Processing standard module hook 'hook-anyio.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+22619 INFO: Processing standard module hook 'hook-orjson.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+22622 INFO: Processing standard module hook 'hook-cryptography.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+24118 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+24283 INFO: Processing standard module hook 'hook-niquests.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+422 WARNING: Failed to collect submodules for 'niquests.extensions.pyodide' because importing 'niquests.extensions.pyodide' raised: ModuleNotFoundError: No module named 'pyodide'
+24957 INFO: Processing standard module hook 'hook-urllib3.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+27264 INFO: Processing standard module hook 'hook-urllib3_future.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+28862 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+30128 INFO: Processing standard module hook 'hook-webview.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\webview\\__pyinstaller'
+30253 INFO: Processing standard module hook 'hook-webbrowser.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+30487 INFO: Processing standard module hook 'hook-clr.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\pythonnet\\_pyinstaller'
+30513 INFO: Processing standard module hook 'hook-clr_loader.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+30591 INFO: Processing standard module hook 'hook-pycparser.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+31051 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+31204 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+31639 INFO: Analyzing hidden import 'qqmusic_api.modules.helper_utils'
+31650 INFO: Analyzing hidden import 'qqmusic_api.modules.login_utils'
+31657 INFO: Analyzing hidden import 'selenium'
+31659 INFO: Analyzing hidden import 'selenium.common'
+31660 INFO: Processing standard module hook 'hook-selenium.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+32083 INFO: Analyzing hidden import 'selenium.webdriver'
+32086 INFO: Analyzing hidden import 'selenium.webdriver.chrome'
+32087 INFO: Analyzing hidden import 'selenium.webdriver.chrome.options'
+32106 INFO: Analyzing hidden import 'selenium.webdriver.chrome.remote_connection'
+32117 INFO: Processing standard module hook 'hook-certifi.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+32175 INFO: Analyzing hidden import 'selenium.webdriver.chrome.service'
+32191 INFO: Analyzing hidden import 'selenium.webdriver.chrome.webdriver'
+32566 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi'
+32566 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.bluetooth'
+32606 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.browser'
+32619 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.browsing_context'
+32678 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.digital_credentials'
+32679 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.emulation'
+32697 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.input'
+32709 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.log'
+32713 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.network'
+32738 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.permissions'
+32741 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.speculation'
+32742 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.storage'
+32747 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.user_agent_client_hints'
+32750 INFO: Analyzing hidden import 'selenium.webdriver.common._bidi.web_extension'
+32753 INFO: Analyzing hidden import 'selenium.webdriver.common.action_chains'
+32777 INFO: Analyzing hidden import 'selenium.webdriver.common.bidi.cdp'
+33397 INFO: Analyzing hidden import 'selenium.webdriver.common.bidi.console'
+33398 INFO: Analyzing hidden import 'selenium.webdriver.common.log'
+33403 INFO: Analyzing hidden import 'selenium.webdriver.common.window'
+33403 INFO: Analyzing hidden import 'selenium.webdriver.edge.options'
+33404 INFO: Analyzing hidden import 'selenium.webdriver.edge.service'
+33406 INFO: Analyzing hidden import 'selenium.webdriver.edge.webdriver'
+33407 INFO: Analyzing hidden import 'selenium.webdriver.firefox.firefox_profile'
+33410 INFO: Analyzing hidden import 'selenium.webdriver.firefox.options'
+33413 INFO: Analyzing hidden import 'selenium.webdriver.firefox.service'
+33415 INFO: Analyzing hidden import 'selenium.webdriver.firefox.webdriver'
+33419 INFO: Analyzing hidden import 'selenium.webdriver.ie'
+33419 INFO: Analyzing hidden import 'selenium.webdriver.ie.options'
+33424 INFO: Analyzing hidden import 'selenium.webdriver.ie.service'
+33426 INFO: Analyzing hidden import 'selenium.webdriver.ie.webdriver'
+33427 INFO: Analyzing hidden import 'selenium.webdriver.remote.server'
+33431 INFO: Analyzing hidden import 'selenium.webdriver.safari.options'
+33433 INFO: Analyzing hidden import 'selenium.webdriver.safari.permissions'
+33433 INFO: Analyzing hidden import 'selenium.webdriver.safari.service'
+33436 INFO: Analyzing hidden import 'selenium.webdriver.safari.webdriver'
+33438 INFO: Analyzing hidden import 'selenium.webdriver.support.abstract_event_listener'
+33439 INFO: Analyzing hidden import 'selenium.webdriver.support.color'
+33448 INFO: Analyzing hidden import 'selenium.webdriver.support.event_firing_webdriver'
+33456 INFO: Analyzing hidden import 'selenium.webdriver.support.events'
+33456 INFO: Analyzing hidden import 'selenium.webdriver.support.expected_conditions'
+33465 INFO: Analyzing hidden import 'selenium.webdriver.support.select'
+33470 INFO: Analyzing hidden import 'selenium.webdriver.support.ui'
+33470 INFO: Analyzing hidden import 'selenium.webdriver.webkitgtk'
+33472 INFO: Analyzing hidden import 'selenium.webdriver.webkitgtk.options'
+33473 INFO: Analyzing hidden import 'selenium.webdriver.webkitgtk.service'
+33475 INFO: Analyzing hidden import 'selenium.webdriver.webkitgtk.webdriver'
+33477 INFO: Analyzing hidden import 'selenium.webdriver.wpewebkit'
+33477 INFO: Analyzing hidden import 'selenium.webdriver.wpewebkit.options'
+33479 INFO: Analyzing hidden import 'selenium.webdriver.wpewebkit.service'
+33480 INFO: Analyzing hidden import 'selenium.webdriver.wpewebkit.webdriver'
+33481 INFO: Analyzing hidden import 'webview.__pyinstaller'
+33481 INFO: Analyzing hidden import 'webview.__pyinstaller.hook-webview'
+33497 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+33499 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+33516 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+33533 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+33535 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+33559 INFO: Processing standard module hook 'hook-win32ctypes.core.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+34955 INFO: Analyzing hidden import 'pythonnet._pyinstaller'
+34956 INFO: Analyzing hidden import 'pythonnet._pyinstaller.hook-clr'
+34957 INFO: Analyzing hidden import 'pygame.__pyinstaller'
+34958 INFO: Analyzing hidden import 'pygame.__pyinstaller.hook-pygame'
+34959 INFO: Analyzing hidden import 'pygame._camera'
+34959 INFO: Analyzing hidden import 'pygame._camera_opencv'
+34964 INFO: Analyzing hidden import 'pygame._camera_vidcapture'
+34975 INFO: Analyzing hidden import 'pygame._sdl2'
+34982 INFO: Analyzing hidden import 'pygame._sdl2.controller'
+34984 INFO: Analyzing hidden import 'pygame._sdl2.mixer'
+34985 INFO: Analyzing hidden import 'pygame._sdl2.touch'
+34986 INFO: Analyzing hidden import 'pygame._sprite'
+34986 INFO: Analyzing hidden import 'pygame.draw_py'
+35000 INFO: Analyzing hidden import 'pygame.examples.aacircle'
+35006 INFO: Analyzing hidden import 'pygame.examples.aliens'
+35014 INFO: Analyzing hidden import 'pygame.examples.arraydemo'
+35017 INFO: Analyzing hidden import 'pygame.examples.audiocapture'
+35020 INFO: Analyzing hidden import 'pygame.examples.blend_fill'
+35023 INFO: Analyzing hidden import 'pygame.examples.blit_blends'
+35029 INFO: Analyzing hidden import 'pygame.examples.chimp'
+35034 INFO: Analyzing hidden import 'pygame.examples.cursors'
+35040 INFO: Analyzing hidden import 'pygame.examples.dropevent'
+35041 INFO: Analyzing hidden import 'pygame.examples.eventlist'
+35047 INFO: Analyzing hidden import 'pygame.examples.font_viewer'
+35052 INFO: Analyzing hidden import 'pygame.examples.fonty'
+35055 INFO: Analyzing hidden import 'pygame.examples.freetype_misc'
+35058 INFO: Analyzing hidden import 'pygame.examples.glcube'
+35069 INFO: Analyzing hidden import 'pygame.examples.go_over_there'
+35071 INFO: Analyzing hidden import 'pygame.examples.grid'
+35074 INFO: Analyzing hidden import 'pygame.examples.headless_no_windows_needed'
+35076 INFO: Analyzing hidden import 'pygame.examples.joystick'
+35079 INFO: Analyzing hidden import 'pygame.examples.liquid'
+35080 INFO: Analyzing hidden import 'pygame.examples.mask'
+35084 INFO: Analyzing hidden import 'pygame.examples.midi'
+35109 INFO: Analyzing hidden import 'pygame.examples.moveit'
+35111 INFO: Analyzing hidden import 'pygame.examples.music_drop_fade'
+35117 INFO: Analyzing hidden import 'pygame.examples.pixelarray'
+35122 INFO: Analyzing hidden import 'pygame.examples.playmus'
+35125 INFO: Analyzing hidden import 'pygame.examples.resizing_new'
+35127 INFO: Analyzing hidden import 'pygame.examples.scaletest'
+35130 INFO: Analyzing hidden import 'pygame.examples.scrap_clipboard'
+35134 INFO: Analyzing hidden import 'pygame.examples.scroll'
+35138 INFO: Analyzing hidden import 'pygame.examples.setmodescale'
+35141 INFO: Analyzing hidden import 'pygame.examples.sound'
+35142 INFO: Analyzing hidden import 'pygame.examples.sound_array_demos'
+35144 INFO: Analyzing hidden import 'pygame.examples.sprite_texture'
+35149 INFO: Analyzing hidden import 'pygame.examples.stars'
+35153 INFO: Analyzing hidden import 'pygame.examples.testsprite'
+35158 INFO: Analyzing hidden import 'pygame.examples.textinput'
+35163 INFO: Analyzing hidden import 'pygame.examples.vgrade'
+35165 INFO: Analyzing hidden import 'pygame.examples.video'
+35169 INFO: Analyzing hidden import 'pygame.newbuffer'
+35169 INFO: Analyzing hidden import 'pygame.tests'
+35286 INFO: Processing standard module hook 'hook-difflib.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+35812 INFO: Analyzing hidden import 'pygame.tests.base_test'
+35867 INFO: Analyzing hidden import 'pygame.tests.blit_test'
+35872 INFO: Analyzing hidden import 'pygame.tests.bufferproxy_test'
+35885 INFO: Analyzing hidden import 'pygame.tests.camera_test'
+35886 INFO: Analyzing hidden import 'pygame.tests.color_test'
+35934 INFO: Analyzing hidden import 'pygame.tests.constants_test'
+35939 INFO: Analyzing hidden import 'pygame.tests.controller_test'
+35949 INFO: Analyzing hidden import 'pygame.tests.cursors_test'
+35953 INFO: Analyzing hidden import 'pygame.tests.display_test'
+35983 INFO: Analyzing hidden import 'pygame.tests.docs_test'
+35987 INFO: Analyzing hidden import 'pygame.tests.draw_test'
+36181 INFO: Analyzing hidden import 'pygame.tests.event_test'
+36203 INFO: Analyzing hidden import 'pygame.tests.font_test'
+36226 INFO: Analyzing hidden import 'pygame.tests.freetype_tags'
+36227 INFO: Analyzing hidden import 'pygame.tests.freetype_test'
+36279 INFO: Analyzing hidden import 'pygame.tests.ftfont_tags'
+36279 INFO: Analyzing hidden import 'pygame.tests.ftfont_test'
+36281 INFO: Analyzing hidden import 'pygame.tests.gfxdraw_test'
+36310 INFO: Analyzing hidden import 'pygame.tests.image__save_gl_surface_test'
+36313 INFO: Analyzing hidden import 'pygame.tests.image_tags'
+36313 INFO: Analyzing hidden import 'pygame.tests.image_test'
+36442 INFO: Analyzing hidden import 'pygame.tests.imageext_tags'
+36443 INFO: Analyzing hidden import 'pygame.tests.imageext_test'
+36446 INFO: Analyzing hidden import 'pygame.tests.joystick_test'
+36449 INFO: Analyzing hidden import 'pygame.tests.key_test'
+36458 INFO: Analyzing hidden import 'pygame.tests.locals_test'
+36460 INFO: Analyzing hidden import 'pygame.tests.mask_test'
+36668 INFO: Analyzing hidden import 'pygame.tests.math_test'
+36801 INFO: Analyzing hidden import 'pygame.tests.midi_test'
+36815 INFO: Analyzing hidden import 'pygame.tests.mixer_music_tags'
+36816 INFO: Analyzing hidden import 'pygame.tests.mixer_music_test'
+36832 INFO: Analyzing hidden import 'pygame.tests.mixer_tags'
+36833 INFO: Analyzing hidden import 'pygame.tests.mixer_test'
+36878 INFO: Analyzing hidden import 'pygame.tests.mouse_test'
+36890 INFO: Analyzing hidden import 'pygame.tests.pixelarray_test'
+36947 INFO: Analyzing hidden import 'pygame.tests.pixelcopy_test'
+36968 INFO: Analyzing hidden import 'pygame.tests.rect_test'
+37083 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests'
+37083 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok'
+37084 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.fake_2_test'
+37086 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.fake_3_test'
+37087 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.fake_4_test'
+37089 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.fake_5_test'
+37090 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.fake_6_test'
+37092 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.no_assertions__ret_code_of_1__test'
+37093 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.all_ok.zero_tests_test'
+37093 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.everything'
+37093 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.everything.fake_2_test'
+37096 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.everything.incomplete_todo_test'
+37096 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.everything.magic_tag_test'
+37099 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.everything.sleep_test'
+37100 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.exclude'
+37100 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.exclude.fake_2_test'
+37101 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.exclude.invisible_tag_test'
+37103 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.exclude.magic_tag_test'
+37104 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.failures1'
+37106 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.failures1.fake_2_test'
+37107 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.failures1.fake_3_test'
+37109 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.failures1.fake_4_test'
+37110 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete'
+37110 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete.fake_2_test'
+37112 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete.fake_3_test'
+37113 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete_todo'
+37113 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete_todo.fake_2_test'
+37116 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.incomplete_todo.fake_3_test'
+37117 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.infinite_loop'
+37118 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.infinite_loop.fake_1_test'
+37119 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.infinite_loop.fake_2_test'
+37121 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stderr'
+37121 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stderr.fake_2_test'
+37123 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stderr.fake_3_test'
+37124 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stderr.fake_4_test'
+37127 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stdout'
+37127 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stdout.fake_2_test'
+37129 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stdout.fake_3_test'
+37130 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.print_stdout.fake_4_test'
+37132 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.run_tests__test'
+37135 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.timeout'
+37136 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.timeout.fake_2_test'
+37136 INFO: Analyzing hidden import 'pygame.tests.run_tests__tests.timeout.sleep_test'
+37138 INFO: Analyzing hidden import 'pygame.tests.rwobject_test'
+37143 INFO: Analyzing hidden import 'pygame.tests.scrap_tags'
+37143 INFO: Analyzing hidden import 'pygame.tests.scrap_test'
+37151 INFO: Analyzing hidden import 'pygame.tests.sndarray_tags'
+37151 INFO: Analyzing hidden import 'pygame.tests.sndarray_test'
+37157 INFO: Analyzing hidden import 'pygame.tests.sprite_test'
+37192 INFO: Analyzing hidden import 'pygame.tests.surface_test'
+37353 INFO: Analyzing hidden import 'pygame.tests.surfarray_tags'
+37356 INFO: Analyzing hidden import 'pygame.tests.surfarray_test'
+37375 INFO: Analyzing hidden import 'pygame.tests.surflock_test'
+37379 INFO: Analyzing hidden import 'pygame.tests.sysfont_test'
+37381 INFO: Analyzing hidden import 'pygame.tests.test_utils.endian'
+37381 INFO: Analyzing hidden import 'pygame.tests.threads_test'
+37387 INFO: Analyzing hidden import 'pygame.tests.time_test'
+37396 INFO: Analyzing hidden import 'pygame.tests.touch_test'
+37399 INFO: Analyzing hidden import 'pygame.tests.transform_test'
+37437 INFO: Analyzing hidden import 'pygame.tests.version_test'
+37439 INFO: Analyzing hidden import 'pygame.tests.video_test'
+37440 INFO: Analyzing hidden import 'selenium.webdriver.remote.service'
+37440 ERROR: Hidden import 'selenium.webdriver.remote.service' not found
+37440 INFO: Analyzing hidden import 'selenium.common.by'
+37440 ERROR: Hidden import 'selenium.common.by' not found
+37440 INFO: Analyzing hidden import 'selenium.types'
+37442 ERROR: Hidden import 'selenium.types' not found
+37442 INFO: Processing module hooks (post-graph stage)...
+37580 WARNING: Hidden import "pycparser.lextab" not found!
+37580 WARNING: Hidden import "pycparser.yacctab" not found!
+37868 WARNING: Hidden import "tzdata" not found!
+37927 INFO: Processing standard module hook 'hook-_tkinter.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks'
+37964 INFO: Performing binary vs. data reclassification (2402 entries)
+38318 INFO: Looking for ctypes DLLs
+38326 WARNING: Ignoring AppKit.framework/AppKit imported from D:\点歌台干活处\.venv\Lib\site-packages\darkdetect\_mac_detect.py - only basenames are supported with ctypes imports!
+38524 INFO: Analyzing run-time hooks ...
+38581 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+38585 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+38588 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+38589 INFO: Including run-time hook 'pyi_rth__tkinter.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+38591 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks'
+38593 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'D:\\点歌台干活处\\.venv\\Lib\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+38680 INFO: Creating base_library.zip...
+38701 INFO: Looking for dynamic libraries
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+41337 INFO: Extra DLL search directories (AddDllDirectory): ['D:\\点歌台干活处\\.venv\\Lib\\site-packages\\pygame']
+41339 INFO: Extra DLL search directories (PATH): []
+42408 INFO: Warnings written to D:\点歌台干活处\build\点歌台\warn-点歌台.txt
+42556 INFO: Graph cross-reference written to D:\点歌台干活处\build\点歌台\xref-点歌台.html
+42660 INFO: checking PYZ
+42769 INFO: checking PKG
+42770 INFO: Building because D:\点歌台干活处\点歌台拆分\main.py changed
+42770 INFO: Building PKG (CArchive) 点歌台.pkg
+42801 INFO: Building PKG (CArchive) 点歌台.pkg completed successfully.
+42803 INFO: Bootloader D:\点歌台干活处\.venv\Lib\site-packages\PyInstaller\bootloader\Windows-64bit-intel\runw.exe
+42803 INFO: checking EXE
+42812 INFO: Rebuilding EXE-00.toc because pkg is more recent
+42812 INFO: Building EXE from EXE-00.toc
+42816 INFO: Copying bootloader EXE to D:\点歌台干活处\build\点歌台\点歌台.exe
+42858 INFO: Copying icon to EXE
+42896 INFO: Copying 0 resources to EXE
+42896 INFO: Embedding manifest in EXE
+42934 INFO: Appending PKG archive to EXE
+43001 INFO: Fixing EXE headers
+43260 INFO: Building EXE from EXE-00.toc completed successfully.
+43289 INFO: checking COLLECT
+43329 INFO: Removing dir D:\点歌台干活处\dist\点歌台
+43853 INFO: Building COLLECT COLLECT-00.toc
+46334 INFO: Building COLLECT COLLECT-00.toc completed successfully.
+46394 INFO: Build complete! The results are available in: D:\点歌台干活处\dist
+[spec] selenium 子模块收集: 145 个
+[spec] webview 收集: datas=67 binaries=9 hidden=32
+[spec] pythonnet 收集: datas=7 binaries=1 hidden=3
+[spec] clr_loader 收集: datas=21 binaries=2 hidden=15
+[spec] pythonnet runtime: Python.Runtime.dll
+[spec] pygame 收集: datas=521 binaries=15
+pygame 2.6.1 (SDL 2.28.4, Python 3.12.10)
+Hello from the pygame community. https://www.pygame.org/contribute.html
+[spec] pygame DLL 强制收集: 15 个
+[spec] 已随包分发驱动: msedgedriver.exe (22 MB)
+[spec] 已随包分发驱动: chromedriver.exe (23 MB)
