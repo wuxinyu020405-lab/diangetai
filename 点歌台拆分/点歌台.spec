@@ -31,18 +31,7 @@ for pkg in ("qqmusic_api", "customtkinter", "blivedm", "winsdk"):
     except Exception as e:
         print(f"[spec][WARN] collect_all({pkg}) 失败: {e}")
 
-# selenium: 用 collect_submodules 兜底全量子模块。
-# selenium 内部大量动态导入（webdriver.Edge → edge.webdriver → remote.webdriver
-# → common.service → selenium_manager），静态分析会漏；实测漏过
-# selenium.webdriver.edge.webdriver 导致打包后完全无法启动浏览器。
-try:
-    _sel = collect_submodules("selenium")
-    hiddenimports += _sel
-    # 数据文件（selenium-manager.exe、类型提示等）
-    datas += collect_data_files("selenium")
-    print(f"[spec] selenium 子模块收集: {len(_sel)} 个")
-except Exception as e:
-    print(f"[spec][WARN] collect_submodules(selenium) 失败: {e}")
+# selenium: 已不再使用（登录改为 pywebview 内嵌浏览器），故不收集。
 
 # ── pywebview（内嵌浏览器登录）──────────────────────────────────
 # 关键：
@@ -106,37 +95,9 @@ hiddenimports += [
     # aiohttp 的 web 子模块
     "aiohttp",
     "aiohttp.web",
-    # selenium 各驱动实现（按需用到 Edge/Chrome）
-    # ⚠️ 关键教训：selenium.webdriver.edge.webdriver / chrome.webdriver 这两个
-    #    才是 webdriver.Edge()/Chrome() 实际实例化的模块。之前只写了
-    #    .service/.options，漏了 .webdriver → 打包后运行时报
-    #    ModuleNotFoundError: No module named 'selenium.webdriver.edge.webdriver'
-    "selenium.webdriver",
-    "selenium.webdriver.edge",
-    "selenium.webdriver.edge.webdriver",
-    "selenium.webdriver.edge.service",
-    "selenium.webdriver.edge.options",
-    "selenium.webdriver.chrome",
-    "selenium.webdriver.chrome.webdriver",
-    "selenium.webdriver.chrome.service",
-    "selenium.webdriver.chrome.options",
-    "selenium.webdriver.remote.webdriver",
-    "selenium.webdriver.remote.service",
-    "selenium.webdriver.remote.remote_connection",
-    "selenium.webdriver.remote.command",
-    "selenium.webdriver.remote.errorhandler",
-    "selenium.webdriver.remote.file_detector",
-    "selenium.webdriver.common.service",
-    "selenium.webdriver.common.driver_finder",
-    "selenium.webdriver.common.selenium_manager",
-    "selenium.webdriver.common.options",
-    "selenium.webdriver.common.proxy",
-    "selenium.webdriver.common.by",
-    "selenium.webdriver.common.utils",
-    "selenium.webdriver.common.timeouts",
-    "selenium.common.exceptions",
-    "selenium.common.by",
-    "selenium.types",
+    # 注意：selenium 已随登录改造移除（改用 pywebview 内嵌浏览器），
+    #      不再需要任何 selenium hidden import。保留条目会让 PyInstaller
+    #      去收集一个已不存在的包，产生 "hidden import not found" 噪声。
     # pygame 的 mixer（音频）
     "pygame",
     "pygame.mixer",
@@ -217,24 +178,48 @@ coll = COLLECT(
     name="点歌台",
 )
 
-# ── 关键：把浏览器驱动复制到发布目录 ──────────────────────────────
-# 朋友的电脑上没有 selenium 缓存，Selenium Manager 需要联网下载驱动，
-# 而国内常连不上 msedgedriver 域名 → "打不开浏览器"。
-# 把驱动随包分发，start_driver 会优先用本地驱动，完全不依赖网络。
+# ── 把 .NET 6 运行时打进发布目录（实现"目标机器无需预装 .NET"）────────
+# 登录用 pywebview + WebView2，走 coreclr 需要 .NET 运行时；
+# 普通用户机器通常没有 .NET 6+ → 必须自包含（微软官方 self-contained 做法）。
+# 目录布局必须与真实 dotnet 安装一致，hostfxr 依赖它来定位共享框架。
+_DOTNET_VER = "6.0.36"
+_DOTNET_SRC = r"C:\Program Files\dotnet"
 _dist = os.path.join(DISTPATH, "点歌台")
-for _drv in ("msedgedriver.exe", "chromedriver.exe"):
-    _src = os.path.join(SPECPATH, _drv)   # spec 与驱动同目录（点歌台拆分/）
-    if os.path.exists(_src):
-        _dst = os.path.join(_dist, _drv)
-        os.makedirs(_dist, exist_ok=True)
-        shutil.copy2(_src, _dst)
-        print(f"[spec] 已随包分发驱动: {_drv} ({os.path.getsize(_src)//1024//1024} MB)")
-        # 写版本提示文件：让 get_driver_version 免启动子进程即可得知版本（防黑窗）
-        try:
-            _ver = "156.0.0.0"   # 与本包一致的驱动版本；如需精确可改为读 PE
-            with open(os.path.join(_dist, "driver_version.txt"), "w", encoding="utf-8") as _f:
-                _f.write(_ver)
-        except Exception:
-            pass
-    else:
-        print(f"[spec][WARN] 未找到 {_drv}，分发包将依赖 Selenium Manager 联网下载")
+_dst = os.path.join(_dist, "dotnet")
+
+_src_core = os.path.join(_DOTNET_SRC, "shared", "Microsoft.NETCore.App", _DOTNET_VER)
+if os.path.isdir(_src_core):
+    if os.path.isdir(_dst):
+        shutil.rmtree(_dst, ignore_errors=True)
+    os.makedirs(_dst, exist_ok=True)
+
+    # dotnet.exe（apphost）
+    _e = os.path.join(_DOTNET_SRC, "dotnet.exe")
+    if os.path.exists(_e):
+        shutil.copy2(_e, os.path.join(_dst, "dotnet.exe"))
+
+    # host/fxr/<ver>/hostfxr.dll —— 运行时启动的关键
+    _fxr_src = os.path.join(_DOTNET_SRC, "host", "fxr", _DOTNET_VER)
+    if os.path.isdir(_fxr_src):
+        _fxr_dst = os.path.join(_dst, "host", "fxr", _DOTNET_VER)
+        os.makedirs(_fxr_dst, exist_ok=True)
+        for _f in os.listdir(_fxr_src):
+            shutil.copy2(os.path.join(_fxr_src, _f), os.path.join(_fxr_dst, _f))
+
+    # shared/<framework>/<ver>
+    _bytes = 0
+    for _fw in ("Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App"):
+        _s = os.path.join(_DOTNET_SRC, "shared", _fw, _DOTNET_VER)
+        if not os.path.isdir(_s):
+            print(f"[spec][WARN] 缺少 {_fw}/{_DOTNET_VER}")
+            continue
+        _d = os.path.join(_dst, "shared", _fw, _DOTNET_VER)
+        os.makedirs(_d, exist_ok=True)
+        for _f in os.listdir(_s):
+            _p = os.path.join(_s, _f)
+            if os.path.isfile(_p):
+                shutil.copy2(_p, os.path.join(_d, _f))
+                _bytes += os.path.getsize(_p)
+    print(f"[spec] 已内置 .NET {_DOTNET_VER} 运行时: {_bytes/1024/1024:.1f} MB")
+else:
+    print(f"[spec][WARN] 未找到 .NET {_DOTNET_VER}，分发包将要求用户预装 .NET 运行时")

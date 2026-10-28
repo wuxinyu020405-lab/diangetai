@@ -16,16 +16,17 @@ os.environ.setdefault("PYTHONNET_RUNTIME", "coreclr")
 
 
 def _setup_dotnet_for_webview():
-    """打包环境下把 .NET Desktop 运行时相关信息准备好。
+    """把 .NET 运行时位置准备好，让 coreclr 能找到 WindowsDesktop 共享框架。
 
-    pywebview 的 configure_coreclr() 用 __file__ 定位自带 runtimeconfig，
-    但在 PyInstaller 的解压目录（_MEIPASS）里可能取不到正确路径，
-    导致 coreclr 起得来却没有 WindowsDesktop 共享框架 → 报
+    优先级（关键：包内自带的运行时优先，保证"目标机器无需预装 .NET"）：
+      ① 程序目录下的 dotnet/ —— 分发包内置的 .NET 6 运行时
+      ② 系统 Program Files\\dotnet —— 开发机环境
+      x64 子目录优先（ARM64 上的 x64 Python 需要它）。
+
+    同时把 pywebview 的 runtimeconfig 指对：它的 configure_coreclr() 用
+    __file__ 定位，在 PyInstaller 环境（_MEIPASS）下可能取不到正确路径，
+    会导致 coreclr 起来了却没有 WindowsDesktop 框架 →
     "Could not load file or assembly 'System.Windows.Forms'"。
-
-    这里主动做两件事：
-      ① 指到包内自带的 pywebview-runtimeconfig.json（若存在）
-      ② 设 DOTNET_ROOT 到真实 dotnet 安装位置，让 hostfxr 能找到共享框架
     """
     try:
         base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__))
@@ -33,8 +34,20 @@ def _setup_dotnet_for_webview():
         if os.path.exists(cfg):
             os.environ.setdefault("PYTHONNET_CORECLR_RUNTIME_CONFIG", cfg)
 
-        # DOTNET_ROOT：优先 x64 子目录（ARM64 上的 x64 Python 需要它），
-        # 否则用标准 Program Files\dotnet
+        # ① 包内自带的 dotnet（自定义安装布局：<程序目录>/dotnet）
+        app_dirs = []
+        if getattr(sys, "frozen", False):
+            app_dirs.append(os.path.dirname(sys.executable))
+        else:
+            app_dirs.append(os.path.dirname(os.path.abspath(__file__)))
+        for ad in app_dirs:
+            cand = os.path.join(ad, "dotnet")
+            if os.path.isdir(os.path.join(cand, "shared")):
+                os.environ["DOTNET_ROOT"] = cand
+                os.environ["DOTNET_ROOT_X64"] = cand
+                return
+
+        # ② 系统安装的 dotnet
         pf = os.environ.get("ProgramFiles", r"C:\Program Files")
         for cand in (os.path.join(pf, "dotnet", "x64"), os.path.join(pf, "dotnet")):
             if os.path.isdir(cand):

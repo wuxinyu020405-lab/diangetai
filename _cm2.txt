@@ -1,0 +1,33 @@
+feat(release): 精简版发布包，内置 .NET 6 运行时实现零外部依赖
+
+体积与构成
+- 移除 selenium 及其 45MB 驱动，登录已改 pywebview
+- 内置 .NET 6.0.36 运行时 141MB，目标机器无需预装 .NET
+- 最终 283MB，压缩后 118MB
+
+.NET 问题的解决
+.NET Framework 4.8 是 Win10/11 内置，但 pywebview 的 coreclr 路径需要
+.NET 6+ 运行时，普通用户机器通常没有。按微软官方 self-contained 方案，
+把共享框架整目录内置：
+
+  <程序目录>/dotnet/
+  ├── dotnet.exe
+  ├── host/fxr/6.0.36/hostfxr.dll
+  └── shared/
+      ├── Microsoft.NETCore.App/6.0.36/       224 文件
+      └── Microsoft.WindowsDesktop.App/6.0.36/ 61 文件
+
+main._setup_dotnet_for_webview 让 DOTNET_ROOT 优先指向包内 dotnet，
+其次才回落系统安装目录。
+
+验证，关键证据链
+1. dist 自检全绿：9 模块 OK 加 WebView2 v156 加内嵌浏览器可创建关闭
+2. 模拟目标机器没装 .NET：DOTNET_ROOT 指向包内、PATH 剔除系统 dotnet、
+   DOTNET_MULTILEVEL_LOOKUP=0，自检仍全绿，内嵌浏览器正常
+3. 从 zip 全新解压后重复第 2 步，同样全绿
+4. msedgedriver 残留进程 0 个
+5. zip 内无 config.json/credential.json/music_cache/日志/驱动
+
+文档
+- 使用说明.md 面向用户，含 WebView2 前置条件与 selftest 排错流程
+- 打包说明.md 面向维护者，记录 8 个历史坑与四步验收清单
