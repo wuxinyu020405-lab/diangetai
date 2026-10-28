@@ -45,7 +45,7 @@ case("403外的旧式 timeout=30 换成 ClientTimeout", "timeout=aiohttp.ClientT
 case("预算常量入 settings", hasattr(settings, "SONG_DOWNLOAD_BUDGET_SEC"))
 case("MIN_CACHE_BYTES 判据", musiclib.MIN_CACHE_BYTES == 100 * 1024)
 
-print("═══ C. 预热只做一次 + 预算超时快速放弃（全程零真实网络）═══")
+print("═══ C. #4 预热已删除 + 预算超时快速放弃（全程零真实网络）═══")
 
 
 class FakeCred:
@@ -69,29 +69,27 @@ s = Stub()
 orig_budget = settings.SONG_DOWNLOAD_BUDGET_SEC
 try:
     settings.SONG_DOWNLOAD_BUDGET_SEC = -5   # 预算已耗尽（模拟极慢网络后的超时态）
-    # 第1次：未预热 → 仍会做1.5s预热（保留冷启动语义），随后预算检查立刻放弃
-    s._download_warmed = False
     t0 = time.time()
     res = asyncio.run(mainapp.MusicApp.download_audio_qq(
         s, {"mid": "MID_Z", "display_name": "超时歌", "flac_size": None}))
     dt1 = time.time() - t0
     case("超时返回None", res[0] is None)
     case("归因=budget", s.last_download_reason == "budget")
-    case("首次含1.5s预热", 1.3 < dt1 < 3.0, f"{dt1:.2f}s")
-    case("预热标记已置位", s._download_warmed is True)
-    # 第2次：已预热 → 不再花1.5s，立刻预算放弃
+    case("#4 预热已删：首轮也立即放弃(无1.5s等待)", dt1 < 0.5, f"{dt1:.2f}s")
+    case("#4 不再设置预热标记", not hasattr(s, "_download_warmed"))
+    # 二次行为一致
     t0 = time.time()
     res = asyncio.run(mainapp.MusicApp.download_audio_qq(
         s, {"mid": "MID_Z2", "display_name": "超时歌2", "flac_size": None}))
     dt2 = time.time() - t0
-    case("二次无预热(显著更快)", dt2 < 0.5, f"{dt2:.2f}s")
+    case("二次同样快速", dt2 < 0.5, f"{dt2:.2f}s")
+    case("#4 日志不再出现'预热'字样", not any("预热" in m for m in s.logs))
 finally:
     settings.SONG_DOWNLOAD_BUDGET_SEC = orig_budget
 
-print("═══ D. 缓存命中不受预算/预热影响 ═══")
+print("═══ D. 缓存命中不受预算影响（#4 后已无预热概念）═══")
 with open(os.path.join(tmp, "MIDC_flac.flac"), "wb") as f:
     f.write(b"z" * 200_000)
-s._download_warmed = False
 try:
     settings.SONG_DOWNLOAD_BUDGET_SEC = -5
     t0 = time.time()
@@ -100,7 +98,6 @@ try:
     dt = time.time() - t0
     case("预算耗尽仍秒取缓存", res[0] and res[0].endswith("MIDC_flac.flac") and dt < 0.2, f"{dt:.2f}s")
     case("归因=cached", s.last_download_reason == "cached")
-    case("未触发预热", s._download_warmed is False)
 finally:
     settings.SONG_DOWNLOAD_BUDGET_SEC = orig_budget
 

@@ -33,3 +33,4 @@ quota_state.json
 _login_profile/
 _login_tmp/
 *.part
+_chk.js

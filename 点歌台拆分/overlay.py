@@ -44,7 +44,7 @@ li {font-family: var(--font-list); margin-bottom: 10px; text-shadow: 1px 1px 2px
     padding: 4px 0;
     opacity: var(--lyric-op-base, 0.5);
     min-height: 1.2em;
-    line-height: 1.4;
+    line-height: var(--lyric-line-height, 1.4);
 }
 .lyric-line.active {
     font-weight: bold;
@@ -131,7 +131,7 @@ body[data-lyric-effect="apple_blur"] .lyric-track {
 /* 苹果景深滚动 (柔光) */
 body[data-lyric-effect="apple_blur"] .lyric-line {
     font-size: calc(var(--lyric-font-size) * 1.15);
-    line-height: 1.42;
+    line-height: var(--lyric-line-height, 1.42);
     padding: 10px 6%;
     box-sizing: border-box;
     max-width: 100%;
@@ -156,7 +156,7 @@ body[data-lyric-effect="apple_blur"] .lyric-line.active {
 /* 高清平滑滚动 (锐利) */
 body[data-lyric-effect="apple_hd"] .lyric-line {
     font-size: calc(var(--lyric-font-size) * 1.12);
-    line-height: 1.42;
+    line-height: var(--lyric-line-height, 1.42);
     padding: 9px 6%;
     box-sizing: border-box;
     max-width: 100%;
@@ -178,6 +178,12 @@ body[data-lyric-effect="apple_hd"] .lyric-line.active {
 /* 综合挂件特有样式调整 */
 body.mixed-mode .lyric-box.hidden-lyric { height: 0 !important; margin: 0 !important; padding: 0 !important; overflow: hidden; display: none !important; }
 body.mixed-mode .lyric-box { height: 250px; display: block; }
+/* #2 综合源默认静态两行：高度自适应（否则 250px 盒子装两行会上下空出一大截）。
+   滚动效果仍需要固定高度来做上下遮罩，故只对 static 生效。 */
+body.mixed-mode[data-lyric-effect="static"] .lyric-box {
+    height: auto; min-height: 0; display: flex; flex-direction: column;
+    justify-content: center; margin-bottom: 10px;
+}
 body.playing-only-mode, body.queue-only-mode { display: flex; flex-direction: column; justify-content: center; height: 100vh; padding: 0; box-sizing: border-box; align-items: center; }
 body.playing-only-mode .system-box { margin-bottom: 0; }
 body.queue-only-mode ul { width: 100%; text-align: center; }
@@ -209,13 +215,21 @@ let lastActiveIdx = -1;
 let lastLayoutKey = ''; 
 let lastEffectMode = '';
 let lyricOpK = 1;   // 第6步·透明度T-A系数（0~1），由 applyLyricOpacity 统一设置
+let lyricLineH = 1.42;   // #6 行间距系数（line_spacing/100），由 updateData 设置
 
-function applyLyricOpacity(k, container) {
+function applyLyricOpacity(k, spacing, container) {
     // 滚动模式：JS 用 lyricOpK 乘各行相对透明度
     // 静态模式：CSS 变量 --lyric-op-base/--lyric-op-active（0.5*k / 1*k，兜底=旧值）
-    lyricOpK = (typeof k === 'number' && k >= 0 && k <= 1) ? k : 1;
-    container.style.setProperty('--lyric-op-base', String(0.5 * lyricOpK));
-    container.style.setProperty('--lyric-op-active', String(1 * lyricOpK));
+    // #5：系数允许 0~2.0（>1 提亮非激活行；CSS 会把 opacity 自动钳到 1，不会出错）
+    lyricOpK = (typeof k === 'number' && k >= 0 && k <= 2) ? Math.min(2, Math.max(0, k)) : 1;
+    container.style.setProperty('--lyric-op-base', String(Math.min(1, 0.5 * lyricOpK)));
+    container.style.setProperty('--lyric-op-active', String(Math.min(1, 1 * lyricOpK)));
+    // #6 行间距：line_spacing 为百分比（默认142=现状），换算成 line-height 系数
+    const lh = (typeof spacing === 'number' && spacing >= 100 && spacing <= 400) ? spacing / 100 : null;
+    if (lh !== null) {
+        lyricLineH = lh;
+        container.style.setProperty('--lyric-line-height', String(lh));
+    }
 }
 
 function updateStaticLyric(lines, align) {
@@ -235,6 +249,28 @@ function updateStaticLyric(lines, align) {
     } else { 
         container.innerHTML = ''; 
     }
+}
+
+// #2 综合源专用：静态两行（当前行 + 下方 nextCount 行），无滚动动效。
+// 后端 current_lyric_info 的窗口按 lyric.lines_prev/next 算，此处按 mixed 自己的
+// 行数设置从 all_lines 重新截取，避免被纯歌词页的设置牵连。
+function updateMixedTwoLine(allLines, activeIdx, prevCount, nextCount, align) {
+    const container = document.getElementById('lyric-container');
+    currentSongSignature = '';
+    lastActiveIdx = -1;
+    lastLayoutKey = '';
+    container.style.textAlign = align;
+    const track = document.getElementById('lyric-track');
+    if (track) track.remove();          // 清掉滚动轨道，避免残留 transform
+    if (!allLines || activeIdx < 0) { container.innerHTML = ''; return; }
+    const start = Math.max(0, activeIdx - prevCount);
+    const end = Math.min(allLines.length, activeIdx + nextCount + 1);
+    let html = '';
+    for (let i = start; i < end; i++) {
+        const cls = (i === activeIdx) ? 'lyric-line active' : 'lyric-line';
+        html += `<div class="${cls}">${allLines[i] || '&nbsp;'}</div>`;
+    }
+    container.innerHTML = html;
 }
 
 function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
@@ -276,7 +312,7 @@ function updateAppleMusicScroll(allLines, activeIdx, style, effectMode, align) {
 
     const prevCount = (style.lines_prev !== undefined) ? style.lines_prev : 2; 
     const nextCount = (style.lines_next !== undefined) ? style.lines_next : 2;
-    const layoutKey = `${effectMode}_${activeIdx}_${prevCount}_${nextCount}_${style.size}_${style.align}_${style.is_bold}_${lyricOpK}_${window.innerHeight}_${window.innerWidth}`;   // 第6步：含透明度系数，滑杆即时生效
+    const layoutKey = `${effectMode}_${activeIdx}_${prevCount}_${nextCount}_${style.size}_${style.align}_${style.is_bold}_${lyricOpK}_${lyricLineH}_${window.innerHeight}_${window.innerWidth}`;   // 第6步：含透明度/行距系数，滑杆即时生效
 
     if (!isNewSong && !isEffectChanged && layoutKey === lastLayoutKey) { 
         return; 
@@ -400,7 +436,12 @@ async function updateData() {
             sys.style.color = cfg.mixed.color_playing;
             sys.style.fontWeight = cfg.mixed.bold_playing ? 'bold' : 'normal';
             sys.classList.toggle('hidden', !cfg.mixed.show_playing);
-            const mixPfx = (cfg.mixed.show_prefix === false) ? '' : '🎵 正在播放: ';   // 第6步·修16.3-②
+            // #3：把"🎵"图标与"正在播放:"文字拆成两个独立开关
+            //   show_icon=false    → 去掉 🎵
+            //   show_prefix=false  → 去掉"正在播放:"（图标仍可保留）
+            const mixIcon = (cfg.mixed.show_icon === false) ? '' : '🎵 ';
+            const mixWord = (cfg.mixed.show_prefix === false) ? '' : '正在播放: ';
+            const mixPfx = mixIcon + mixWord;
             const sysText = (data.system_playing && data.system_playing !== "暂无播放") ? (mixPfx + data.system_playing) : (mixPfx + '暂无');
             sys.innerText = sysText;
             
@@ -432,7 +473,7 @@ async function updateData() {
             lc.style.setProperty('--lyric-font-size', cfg.mixed.size_lyric + 'px');
             lc.style.setProperty('--lyric-color', cfg.mixed.color_lyric);
             lc.style.setProperty('--lyric-font-weight', cfg.mixed.bold_lyric ? 'bold' : 'normal');
-            applyLyricOpacity(cfg.lyric.opacity, lc);   // 第6步·透明度（与纯歌词共用 lyric.opacity）
+            applyLyricOpacity(cfg.lyric.opacity, cfg.lyric.line_spacing, lc);   // 第6步·透明度+行距（mixed 共用）
             
             if (cfg.mixed.show_lyric) {
                 lc.classList.remove('hidden-lyric');
@@ -441,7 +482,7 @@ async function updateData() {
                 const mPrev = (cfg.mixed.lines_prev !== undefined) ? cfg.mixed.lines_prev : cfg.lyric.lines_prev;
                 const mNext = (cfg.mixed.lines_next !== undefined) ? cfg.mixed.lines_next : cfg.lyric.lines_next;
                 const mixedStyle = { size: cfg.mixed.size_lyric, lines_prev: mPrev, lines_next: mNext, align: mAlign };
-                if (cfg.mixed.effect_lyric === 'static') updateStaticLyric(data.lyric.lines, mAlign);
+                if (cfg.mixed.effect_lyric === 'static') updateMixedTwoLine(data.lyric.all_lines, data.lyric.active_idx, mPrev, mNext, mAlign);
                 else updateAppleMusicScroll(data.lyric.all_lines, data.lyric.active_idx, mixedStyle, cfg.mixed.effect_lyric, mAlign);
             } else { 
                 lc.classList.add('hidden-lyric');
@@ -495,7 +536,7 @@ async function updateData() {
             lc.style.setProperty('--lyric-font-size', cfg.lyric.size + 'px');
             lc.style.setProperty('--lyric-color', cfg.lyric.color);
             lc.style.setProperty('--lyric-font-weight', cfg.lyric.is_bold ? 'bold' : 'normal');
-            applyLyricOpacity(cfg.lyric.opacity, lc);   // 第6步·透明度T-A
+            applyLyricOpacity(cfg.lyric.opacity, cfg.lyric.line_spacing, lc);   // 第6步·透明度T-A + #6行距
             document.body.setAttribute('data-lyric-effect', cfg.lyric.effect);
             
             if (cfg.lyric.effect === 'static') updateStaticLyric(data.lyric.lines, align);

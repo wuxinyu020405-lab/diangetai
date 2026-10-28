@@ -293,9 +293,11 @@ class MusicApp:
         scale_sp.set(state.style_config['mixed']['size_playing'])
         scale_sp.pack(side=tk.LEFT, padx=2)
         tk.Checkbutton(f1, text="加粗", variable=self.var_mix_bp, command=lambda: self.update_mixed("bold_playing", self.var_mix_bp.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        # 第6步·修16.3-②：综合挂件此前硬编码前缀，此勾选框真正控制 show_prefix
+        # 第6步·修16.3-② + #3：图标与"正在播放:"文字分开控制
+        self.var_mix_icon = tk.BooleanVar(value=state.style_config['mixed'].get("show_icon", True))
+        tk.Checkbutton(f1, text="🎵", variable=self.var_mix_icon, command=lambda: self.update_mixed("show_icon", self.var_mix_icon.get()), bg="#f0f0f0").pack(side=tk.LEFT)
         self.var_mix_pfx = tk.BooleanVar(value=state.style_config['mixed'].get("show_prefix", True))
-        tk.Checkbutton(f1, text="显示前缀", variable=self.var_mix_pfx, command=lambda: self.update_mixed("show_prefix", self.var_mix_pfx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
+        tk.Checkbutton(f1, text="“…正在播放”字样", variable=self.var_mix_pfx, command=lambda: self.update_mixed("show_prefix", self.var_mix_pfx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
 
         tk.Label(mixed_inner, text="--- 实时歌词样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
         f2 = tk.Frame(mixed_inner, bg="#f0f0f0"); f2.pack(fill=tk.X, pady=2)
@@ -313,7 +315,7 @@ class MusicApp:
         scale_sl.pack(side=tk.LEFT, padx=2)
         eff_mix = ttk.Combobox(f2, values=["高清平滑滚动", "苹果景深滚动", "无滚动 (静态)"], state="readonly", width=11)
         eff_mix_map = {"apple_hd": "高清平滑滚动", "apple_blur": "苹果景深滚动", "static": "无滚动 (静态)"}
-        eff_mix.set(eff_mix_map.get(state.style_config['mixed']['effect_lyric'], "高清平滑滚动"))
+        eff_mix.set(eff_mix_map.get(state.style_config['mixed']['effect_lyric'], "无滚动 (静态)"))
         eff_mix.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("effect_lyric", {"高清平滑滚动":"apple_hd", "苹果景深滚动":"apple_blur", "无滚动 (静态)":"static"}[eff_mix.get()]))
         eff_mix.pack(side=tk.LEFT, padx=2)
         tk.Checkbutton(f2, text="加粗", variable=self.var_mix_bl, command=lambda: self.update_mixed("bold_lyric", self.var_mix_bl.get()), bg="#f0f0f0").pack(side=tk.LEFT)
@@ -323,6 +325,22 @@ class MusicApp:
         self.combo_mix_align.set(_malign)
         self.combo_mix_align.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("align", {"居中": "center", "左": "left", "右": "right"}[self.combo_mix_align.get()]))
         self.combo_mix_align.pack(side=tk.LEFT, padx=2)
+
+        # #2 综合源歌词行数：默认 0/1 = 仅当前行 + 下一行（共两行）
+        f2b = tk.Frame(mixed_inner, bg="#f0f0f0"); f2b.pack(fill=tk.X, pady=2)
+        tk.Label(f2b, text="上方已播行数:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
+        self.spin_mix_prev = tk.Spinbox(f2b, from_=0, to=5, width=4,
+                                        command=lambda: self.update_mixed("lines_prev", self._spin_int_or(self.spin_mix_prev, 0)))
+        self.spin_mix_prev.delete(0, tk.END); self.spin_mix_prev.insert(0, str(state.style_config['mixed'].get("lines_prev", 0)))
+        self.spin_mix_prev.bind("<KeyRelease>", lambda e: self.update_mixed("lines_prev", self._spin_int_or(self.spin_mix_prev, 0)))
+        self.spin_mix_prev.pack(side=tk.LEFT, padx=2)
+        tk.Label(f2b, text="下方未播行数:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
+        self.spin_mix_next = tk.Spinbox(f2b, from_=0, to=8, width=4,
+                                        command=lambda: self.update_mixed("lines_next", self._spin_int_or(self.spin_mix_next, 1)))
+        self.spin_mix_next.delete(0, tk.END); self.spin_mix_next.insert(0, str(state.style_config['mixed'].get("lines_next", 1)))
+        self.spin_mix_next.bind("<KeyRelease>", lambda e: self.update_mixed("lines_next", self._spin_int_or(self.spin_mix_next, 1)))
+        self.spin_mix_next.pack(side=tk.LEFT, padx=2)
+        tk.Label(f2b, text="（默认 0/1 = 当前行+下一行，无滚动）", bg="#f0f0f0", fg="#888").pack(side=tk.LEFT, padx=(6,0))
 
         tk.Label(mixed_inner, text="--- 点歌列表样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
         f3 = tk.Frame(mixed_inner, bg="#f0f0f0"); f3.pack(fill=tk.X, pady=2)
@@ -422,12 +440,19 @@ class MusicApp:
         tk.Checkbutton(lyric_inner, text="字体加粗", variable=self.var_lyric_bold, command=lambda: self.update_lyric("is_bold", self.var_lyric_bold.get()), bg="#f0f0f0").grid(row=8, column=1, sticky="w", pady=5)
 
         # 第6步·高价值1：歌词整体透明度（T-A 等比缩放：只改变整体明暗，滚动层次保留；
-        # 纯歌词页与综合挂件共用本值）
-        tk.Label(lyric_inner, text="歌词透明度:", bg="#f0f0f0").grid(row=9, column=0, padx=5, sticky="e")
-        self.scale_lyric_op = tk.Scale(lyric_inner, from_=10, to=100, orient=tk.HORIZONTAL,
+        # 纯歌词页与综合挂件共用本值）。#5：范围放宽到 10~200%，>100% 提亮非激活行
+        tk.Label(lyric_inner, text="歌词明暗(%):", bg="#f0f0f0").grid(row=9, column=0, padx=5, sticky="e")
+        self.scale_lyric_op = tk.Scale(lyric_inner, from_=10, to=200, orient=tk.HORIZONTAL,
                                        command=lambda e: self.update_lyric("opacity", int(e) / 100.0))
         self.scale_lyric_op.set(int(round(state.style_config['lyric'].get("opacity", 1.0) * 100)))
         self.scale_lyric_op.grid(row=9, column=1, sticky="w")
+
+        # #6 行间距：line-height 百分比（默认 142 = 改造前观感）
+        tk.Label(lyric_inner, text="歌词行间距(%):", bg="#f0f0f0").grid(row=10, column=0, padx=5, sticky="e")
+        self.scale_lyric_lh = tk.Scale(lyric_inner, from_=100, to=400, orient=tk.HORIZONTAL,
+                                       command=lambda e: self.update_lyric("line_spacing", int(e)))
+        self.scale_lyric_lh.set(int(state.style_config['lyric'].get("line_spacing", 142)))
+        self.scale_lyric_lh.grid(row=10, column=1, sticky="w")
 
         # ==========================================
         # Tab 6: 正在播放源设置
@@ -649,7 +674,7 @@ class MusicApp:
             async with Client(credential=state.qq_credential) as client:
                 if not song_mid and keyword:
                     search_res = await client.search.search_by_type(keyword=keyword, num=1)
-                    song_mid, _, _, _ = musiclib.extract_song_info(search_res)
+                    song_mid, _, _, _, _ = musiclib.extract_song_info(search_res)   # 5元组（step2起）
                 if not song_mid: return []
                 if song_mid in state.lyric_cache: return state.lyric_cache[song_mid]
                 lyric_res = await client.lyric.get_lyric(value=song_mid)
@@ -798,12 +823,9 @@ class MusicApp:
                 print(f"[WARN] CDN分发信息获取失败: {e}")
             return ""
 
-        # ===== 首次请求前预热：给CDN和网络连接足够的初始化时间 =====
-        # 第7步（P1-8）：预热只在本会话第一次真实下载做（冷启动代价）；之后跳过。
-        if not getattr(self, "_download_warmed", False):
-            self.log(f"[INFO] 开始下载预热，等待网络初始化...")
-            await asyncio.sleep(1.5)
-            self._download_warmed = True
+        # #4：原"下载前固定预热 1.5s"已移除。
+        # 实测（2026-10-28，真实取址各 3 轮）：不预热 3/3 成功、预热后 3/3 成功，
+        # result 码均为 0 —— 预热对成功率零贡献，纯属白白增加每次下载 1.5 秒延迟。
         if time.time() > dl_deadline:
             self.log(f"[{display_name}] 预算内未及开始取址（{settings.SONG_DOWNLOAD_BUDGET_SEC}s），本首放弃")
             self.last_download_reason = "budget"
