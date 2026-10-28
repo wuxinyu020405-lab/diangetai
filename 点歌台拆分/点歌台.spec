@@ -27,6 +27,19 @@ for pkg in ("qqmusic_api", "customtkinter", "blivedm", "winsdk"):
     except Exception as e:
         print(f"[spec][WARN] collect_all({pkg}) 失败: {e}")
 
+# selenium: 用 collect_submodules 兜底全量子模块。
+# selenium 内部大量动态导入（webdriver.Edge → edge.webdriver → remote.webdriver
+# → common.service → selenium_manager），静态分析会漏；实测漏过
+# selenium.webdriver.edge.webdriver 导致打包后完全无法启动浏览器。
+try:
+    _sel = collect_submodules("selenium")
+    hiddenimports += _sel
+    # 数据文件（selenium-manager.exe、类型提示等）
+    datas += collect_data_files("selenium")
+    print(f"[spec] selenium 子模块收集: {len(_sel)} 个")
+except Exception as e:
+    print(f"[spec][WARN] collect_submodules(selenium) 失败: {e}")
+
 # ── 已知静态分析抓不到的动态导入 ──────────────────────────────────
 hiddenimports += [
     # 源码 L1-L7 显式导入（qqmusic_api -> jsonpath_ng -> ply 传递依赖）
@@ -39,12 +52,36 @@ hiddenimports += [
     "aiohttp",
     "aiohttp.web",
     # selenium 各驱动实现（按需用到 Edge/Chrome）
+    # ⚠️ 关键教训：selenium.webdriver.edge.webdriver / chrome.webdriver 这两个
+    #    才是 webdriver.Edge()/Chrome() 实际实例化的模块。之前只写了
+    #    .service/.options，漏了 .webdriver → 打包后运行时报
+    #    ModuleNotFoundError: No module named 'selenium.webdriver.edge.webdriver'
     "selenium.webdriver",
-    "selenium.webdriver.chrome.service",
+    "selenium.webdriver.edge",
+    "selenium.webdriver.edge.webdriver",
     "selenium.webdriver.edge.service",
-    "selenium.webdriver.chrome.options",
     "selenium.webdriver.edge.options",
+    "selenium.webdriver.chrome",
+    "selenium.webdriver.chrome.webdriver",
+    "selenium.webdriver.chrome.service",
+    "selenium.webdriver.chrome.options",
+    "selenium.webdriver.remote.webdriver",
+    "selenium.webdriver.remote.service",
+    "selenium.webdriver.remote.remote_connection",
+    "selenium.webdriver.remote.command",
+    "selenium.webdriver.remote.errorhandler",
+    "selenium.webdriver.remote.file_detector",
+    "selenium.webdriver.common.service",
+    "selenium.webdriver.common.driver_finder",
     "selenium.webdriver.common.selenium_manager",
+    "selenium.webdriver.common.options",
+    "selenium.webdriver.common.proxy",
+    "selenium.webdriver.common.by",
+    "selenium.webdriver.common.utils",
+    "selenium.webdriver.common.timeouts",
+    "selenium.common.exceptions",
+    "selenium.common.by",
+    "selenium.types",
     # pygame 的 mixer（音频）
     "pygame",
     "pygame.mixer",
