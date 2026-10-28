@@ -77,6 +77,8 @@ EXPECTED_CHANGED = {
     "QUALITY_UI_MAP",              # step2 两档文案
     "QUALITY_FALLBACK_CHAINS",     # step2 两档+needs_enum
     "style_config",                # step6 新配置字段
+    "start_driver",                # 登录修复：显式 user-data-dir + TEMP 重定向到程序目录
+                                   #   （绕开系统 TEMP 被拦导致的 cannot create temp dir）
 }
 EXPECTED_REMOVED = {
     "extract_url",     # step1 → extract_url_detail

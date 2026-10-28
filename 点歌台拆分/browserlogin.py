@@ -9,6 +9,7 @@ import urllib.request
 import time
 import json
 import os
+import shutil
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.edge.service import Service as EdgeService
@@ -41,6 +42,23 @@ def start_driver(log_fn=None):
     chrome_driver_path = os.path.join(settings.BASE_DIR, "chromedriver.exe")
     browser = settings.get_default_browser_path()
 
+    # ── 登录专用临时区（修"打包前后时好时坏"的根因，2026-10-28 实测）──
+    # 浏览器驱动创建会话要在系统 TEMP 里建 user-data-dir；TEMP 被安全软件
+    # 或权限策略拦截时即报 "cannot create temp dir"。改放程序目录下（与
+    # music_cache 同性质），并显式传给浏览器绕开 TEMP 依赖。
+    udd = os.path.join(settings.BASE_DIR, "_login_profile")
+    login_tmp = os.path.join(settings.BASE_DIR, "_login_tmp")
+    try:
+        # 上次崩溃可能留下带锁的 profile，先尽力清掉（被占用则忽略，浏览器多半仍能接管）
+        if os.path.isdir(udd):
+            shutil.rmtree(udd, ignore_errors=True)
+        os.makedirs(udd, exist_ok=True)
+        os.makedirs(login_tmp, exist_ok=True)
+        os.environ["TEMP"] = login_tmp
+        os.environ["TMP"] = login_tmp
+    except OSError:
+        udd = None   # 建不了就退回默认行为
+
     def make_edge_opts():
         o = EdgeOptions()
         if browser and browser[0] == "edge":
@@ -49,6 +67,8 @@ def start_driver(log_fn=None):
         o.add_argument("--disable-gpu")
         o.add_argument("--no-sandbox")
         o.add_argument("--disable-dev-shm-usage")
+        if udd:
+            o.add_argument(f"--user-data-dir={udd}")
         try:
             o.add_experimental_option("excludeSwitches", ["enable-logging"])
         except Exception:
@@ -63,6 +83,8 @@ def start_driver(log_fn=None):
         o.add_argument("--disable-gpu")
         o.add_argument("--no-sandbox")
         o.add_argument("--disable-dev-shm-usage")
+        if udd:
+            o.add_argument(f"--user-data-dir={udd}")
         try:
             o.add_experimental_option("excludeSwitches", ["enable-logging"])
         except Exception:

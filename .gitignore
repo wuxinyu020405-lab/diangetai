@@ -28,3 +28,8 @@ debug.log
 
 # 配额记账（运行时产物，跨重启本地有效）
 quota_state.json
+
+# 登录浏览器临时区（程序目录内，运行时产物）
+_login_profile/
+_login_tmp/
+*.part
