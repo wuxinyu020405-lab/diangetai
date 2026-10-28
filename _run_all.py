@@ -37,7 +37,8 @@ for script, label, expect in SUITES:
         for ln in (r.stdout or "").splitlines():
             if "总计" in ln:
                 tail = ln.strip()
-                ok = ok and f"失败 {expect}" in ln and f"通过 {expect}" in ln
+                # 期望计数行形如 "总计 N 项 | 通过 N | 失败 0"
+                ok = ok and f"总计 {expect} 项" in ln and f"通过 {expect}" in ln and "失败 0" in ln
     print(f"{'✅' if ok else '❌'} {label:24s} ({script}) {tail}")
     if not ok:
         fails.append((script, (r.stdout or "")[-400:], (r.stderr or "")[-600:]))
