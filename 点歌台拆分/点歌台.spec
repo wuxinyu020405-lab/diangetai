@@ -44,6 +44,34 @@ try:
 except Exception as e:
     print(f"[spec][WARN] collect_submodules(selenium) 失败: {e}")
 
+# ── pywebview（内嵌浏览器登录）──────────────────────────────────
+# 关键：
+#  · webview/lib 里有两个版本的 WebView2 程序集（根目录=netcore，net462/=Framework），
+#    必须整体作为 datas 带上，否则打包后浏览器起不来
+#  · pythonnet / clr_loader 靠运行时反射加载 Python.Runtime.dll，
+#    静态分析抓不到，必须 collect_all
+#  · pythonnet 的 runtime/*.dll 也要带上（否则 netfx 加载器找不到）
+for _pkg in ("webview", "pythonnet", "clr_loader"):
+    try:
+        _d, _b, _h = collect_all(_pkg)
+        datas += _d
+        binaries += _b
+        hiddenimports += _h
+        print(f"[spec] {_pkg} 收集: datas={len(_d)} binaries={len(_b)} hidden={len(_h)}")
+    except Exception as e:
+        print(f"[spec][WARN] collect_all({_pkg}) 失败: {e}")
+
+# pythonnet 的 Python.Runtime.dll 必须落到 _internal 根（PyInstaller 有时漏）
+try:
+    import pythonnet as _pn
+    import glob as _g
+    _pn_dir = os.path.dirname(_pn.__file__)
+    for _dll in _g.glob(os.path.join(_pn_dir, "runtime", "*.dll")):
+        binaries.append((_dll, "."))
+        print(f"[spec] pythonnet runtime: {os.path.basename(_dll)}")
+except Exception as e:
+    print(f"[spec][WARN] pythonnet runtime 收集失败: {e}")
+
 # pygame: collect_all 会漏掉部分 DLL（实测缺 libmodplug-1.dll、libopusfile-0.dll）。
 # 那两个是 SDL2_mixer 的解码/音乐模块依赖，缺了可能导致某些格式放不出来。
 try:

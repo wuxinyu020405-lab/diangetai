@@ -1,0 +1,187 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm[toml]"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pywebview"
+authors = [{ name = "Roman Sirokov", email = "roman@flowrl.com" }]
+description = "Build GUI for your Python program with JavaScript, HTML, and CSS"
+keywords = ["gui", "webkit", "html", "web"]
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Environment :: MacOS X",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: GTK",
+    "Environment :: X11 Applications :: Qt",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+]
+dependencies = [
+    "pythonnet;sys_platform=='win32'",
+    "pyobjc-core>=9.0;sys_platform=='darwin'",
+    "pyobjc-framework-Cocoa>=9.0;sys_platform=='darwin'",
+    "pyobjc-framework-Quartz>=9.0;sys_platform=='darwin'",
+    "pyobjc-framework-WebKit>=9.0;sys_platform=='darwin'",
+    "pyobjc-framework-security>=9.0;sys_platform=='darwin'",
+    "pyobjc-framework-UniformTypeIdentifiers>=9.0;sys_platform=='darwin'",
+    "QtPy;sys_platform=='openbsd6'",
+    "proxy_tools",
+    "bottle",
+    "typing_extensions"
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# Pinned to the pywinrt 3.2.x release train, which is built against Windows
+# App SDK 1.7.250513003 (see pywinrt's CHANGELOG.md) — the exact runtime
+# version .github/workflows/ci.yml's tests-winui3 job installs. An open
+# floor (e.g. `>=3.1`) would let a future pywinrt release silently resolve
+# here, built against a different Windows App SDK version than what CI
+# installs, reintroducing the ON_NO_MATCH_SHOW_UI bootstrap hang that pin
+# was added to fix. Bump both together, deliberately, when upgrading.
+winui3 = [
+    "winrt-runtime>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.Foundation>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.Foundation.Collections>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.Graphics>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.Storage>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.Storage.Pickers>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.UI>=3.2,<3.3;sys_platform=='win32'",
+    "winrt-Windows.UI.Xaml.Interop>=3.2,<3.3;sys_platform=='win32'",
+    "webview2-Microsoft.Web.WebView2.Core>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Dispatching>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Interop>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Windowing>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Xaml>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Xaml.Controls>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Xaml.Markup>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.UI.Xaml.XamlTypeInfo>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.Windows.ApplicationModel.DynamicDependency.Bootstrap>=3.2,<3.3;sys_platform=='win32'",
+    "winui3-Microsoft.Windows.Storage>=3.2,<3.3;sys_platform=='win32'",
+]
+cef = ["cefpython3"]
+gtk = ["PyGObject==3.50.0", "PyGObject-stubs"]
+pyside2 = ["QtPy", "PySide2"]
+pyside6 = ["QtPy", "PySide6"]
+qt = ["QtPy", "PyQt6", "PyQt6-WebEngine"]
+qt5 = ["QtPy", "PyQt5", "pyqtwebengine"]
+qt6 = ["QtPy", "PyQt6", "PyQt6-WebEngine"]
+android = ["jnius"]
+ssl = ["cryptography"]
+dev = ["ruff", "pre-commit", "pytest", "pytest-timeout", "build", "twine"]
+
+[project.urls]
+Homepage = "https://pywebview.flowrl.com/"
+Repository = "https://github.com/r0x0r/pywebview"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+timeout = 60
+# The Android test apps are built and run on a device by buildozer. Descending
+# into them collects the symlinked test modules a second time, and puts the app
+# directory on sys.path, where its `webview` symlink shadows the real package.
+# The rest of the list is pytest's own default, which assigning here replaces.
+norecursedirs = [
+    "*.egg",
+    ".*",
+    "_darcs",
+    "build",
+    "CVS",
+    "dist",
+    "node_modules",
+    "venv",
+    "{arch}",
+    "android",
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+
+# Platform backends bind to native APIs (pythonnet, PyObjC, PyGObject, Qt) that
+# mypy cannot introspect, so they are not type-checked.
+[[tool.mypy.overrides]]
+module = "webview.platforms.*"
+ignore_errors = true
+
+[tool.ruff]
+# Same as Black.
+line-length = 100
+indent-width = 4
+
+# Ruff formats Python code blocks inside Markdown. The documentation samples are
+# written for readability, not PEP 8, so they are left alone.
+extend-exclude = ["*.md"]
+
+# Assume Python 3.10+
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+known-first-party = ["webview"]
+
+[tool.ruff.format]
+# Use single quotes for strings.
+quote-style = "single"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+[tool.setuptools]
+include-package-data = false
+packages = [
+    "webview", "webview.dom", "webview.js", "webview.lib", "webview.platforms",
+    "webview.platforms.android", "webview.platforms.android.jinterface", "webview.platforms.android.jclass",
+    "webview.__pyinstaller"]
+
+[tool.setuptools.package-data]
+"webview.lib" = ["**/*.dll", "**/*.jar", "**/*.json"]
+"webview.js" = ["**/*.js"]
+"webview" = ["py.typed"]
+
+[tool.setuptools_scm]
+write_to = "webview/_version.py"
+
+[tool.uv]
+# Prefer pre-compiled wheels for better installation experience
+resolution = "highest"
+# Use index strategy that prefers wheels over source distributions
+index-strategy = "unsafe-best-match"
+
+[tool.uv.extra-build-dependencies]
+jnius = ["Cython"]
+
+[project.entry-points."pyinstaller40"]
+hook-dirs = "webview.__pyinstaller:get_hook_dirs"

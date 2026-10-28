@@ -1,0 +1,22 @@
+"""
+All Java interfaces should go to this package.
+"""
+
+from webview.platforms.android.jinterface.lang import Runnable
+from webview.platforms.android.jinterface.pywebview import (
+    EventCallbackWrapper,
+    JsApiCallbackWrapper,
+    RequestInterceptor,
+)
+from webview.platforms.android.jinterface.view import KeyListener
+from webview.platforms.android.jinterface.webkit import DownloadListener, ValueCallback
+
+__all__ = (
+    'EventCallbackWrapper',
+    'JsApiCallbackWrapper',
+    'RequestInterceptor',
+    'KeyListener',
+    'Runnable',
+    'ValueCallback',
+    'DownloadListener',
+)

@@ -1,0 +1,43 @@
+plugins {
+     id 'com.android.library' version '8.1.2' apply true
+}
+// apply plugin: 'com.android.library'
+
+android {
+    compileSdkVersion 31
+
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 31
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'lib/src/main/java'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    namespace "com.pywebview"
+}
+
+task jar(type: Jar) {
+    getArchiveClassifier().set('sources')
+    destinationDirectory = file('../../webview/lib')
+    archiveFileName = 'pywebview-android.jar'
+    from "${buildDir}/intermediates/javac/release/classes"
+    dependsOn 'compileReleaseJavaWithJavac'
+}
+
+
+artifacts {
+    archives jar
+}

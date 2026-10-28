@@ -42,10 +42,7 @@ def run_selftest():
     out("")
 
     out("── 关键模块导入 ──")
-    for m in ("selenium.webdriver.edge.webdriver",
-              "selenium.webdriver.chrome.webdriver",
-              "selenium.webdriver.common.selenium_manager",
-              "selenium.webdriver.remote.webdriver",
+    for m in ("webview", "clr", "pythonnet",
               "customtkinter", "pygame", "aiohttp", "blivedm",
               "qqmusic_api", "winsdk.windows.media.control"):
         try:
@@ -55,32 +52,75 @@ def run_selftest():
             out(f"  FAIL {m}: {type(e).__name__}: {e}")
     out("")
 
-    out("── 浏览器与驱动 ──")
+    out("── 浏览器环境 ──")
     b = settings.get_default_browser_path()
-    out("  浏览器: " + (str(b) if b else "未找到 Edge/Chrome"))
-    if b:
-        out("  浏览器版本: v" + str(settings.get_browser_version(b[1])))
-    for name, drv in (("Edge", "msedgedriver.exe"), ("Chrome", "chromedriver.exe")):
-        p = os.path.join(settings.BASE_DIR, drv)
-        if os.path.exists(p):
-            out(f"  {name} 驱动: 存在 v{settings.get_driver_version(p)}")
-        else:
-            out(f"  {name} 驱动: 不存在")
+    out("  默认浏览器: " + (str(b) if b else "未找到 Edge/Chrome"))
+    # WebView2 Runtime（pywebview 依赖它，Win11 自带 / Win10 多数已有）
+    try:
+        import winreg
+        guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+        pv = None
+        for hive, path in (
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{guid}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{guid}"),
+            (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{guid}"),
+        ):
+            try:
+                with winreg.OpenKey(hive, path) as k:
+                    v, _ = winreg.QueryValueEx(k, "pv")
+                    if v and v != "0.0.0.0":
+                        pv = v
+                        break
+            except FileNotFoundError:
+                continue
+        out("  WebView2 Runtime: " + (f"已安装 v{pv}" if pv else "❌ 未安装（登录会失败）"))
+    except Exception as e:
+        out("  WebView2 Runtime 检测异常: " + str(e))
+    # 打包进来的 WebView2 程序集
+    try:
+        import webview as _wv
+        _lib = os.path.join(os.path.dirname(_wv.__file__), "lib")
+        out("  webview/lib: " + ("存在" if os.path.isdir(_lib) else "❌ 缺失"))
+        for f in ("Microsoft.Web.WebView2.Core.dll",
+                  "Microsoft.Web.WebView2.WinForms.dll",
+                  "pywebview-runtimeconfig.json"):
+            out(f"    {f}: " + ("有" if os.path.exists(os.path.join(_lib, f)) else "❌ 无"))
+    except Exception as e:
+        out("  webview 检查异常: " + str(e))
     out("")
 
-    out("── 浏览器真实启动测试 ──")
+    out("── 内嵌浏览器启动测试 ──")
     try:
         import browserlogin
-        drv = browserlogin.start_driver(out)
-        if drv:
-            out("  OK 启动成功: " + str(drv.capabilities.get("browserVersion")))
+        browserlogin._patch_pywebview_for_thread()
+        import webview as _wv2
+        out("  OK pywebview 导入正常")
+        # 尝试在子线程真起一个窗口（5 秒后自动关）
+        import threading
+        import time as _t
+        res = {"ok": False, "err": None}
+
+        def _probe():
             try:
-                drv.quit()
-                out("  OK 已关闭")
+                w = _wv2.create_window("自检", "about:blank", width=400, height=300)
+                def _closer():
+                    _t.sleep(4)
+                    try: w.destroy()
+                    except Exception: pass
+                threading.Thread(target=_closer, daemon=True).start()
+                _wv2.start(debug=False)
+                res["ok"] = True
             except Exception as e:
-                out("  警告 关闭异常: " + str(e))
+                res["err"] = f"{type(e).__name__}: {e}"
+
+        _old = threading.current_thread().name
+        t = threading.Thread(target=_probe, daemon=True)
+        t.start()
+        t.join(timeout=30)
+        if res["ok"]:
+            out("  OK 内嵌浏览器窗口可正常创建与关闭")
         else:
-            out("  FAIL 启动失败（见上方日志与 启动日志.txt）")
+            out("  FAIL " + str(res["err"]))
     except Exception as e:
         out("  FAIL 异常: " + type(e).__name__ + ": " + str(e))
     out("")

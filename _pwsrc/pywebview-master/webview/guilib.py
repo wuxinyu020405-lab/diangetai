@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+import logging
+import os
+import platform
+import sys
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, Literal, TypeAlias, cast, get_args
+
+from webview import WebViewException
+
+GUIType: TypeAlias = Literal[
+    'qt', 'gtk', 'cef', 'mshtml', 'edgechromium', 'android', 'cocoa', 'winui3'
+]
+GUI_TYPES = list(get_args(GUIType))
+
+logger = logging.getLogger('pywebview')
+guilib: ModuleType | None = None
+forced_gui_: GUIType | None = None
+
+
+def initialize(forced_gui: GUIType | None = None):
+    def import_android():
+        global guilib
+
+        try:
+            import webview.platforms.android as guilib
+
+            logger.debug('Using Kivy')
+            return True
+        except (ImportError, ValueError):
+            logger.exception('Kivy cannot be loaded')
+            return False
+
+    def import_gtk():
+        global guilib
+
+        try:
+            import webview.platforms.gtk as guilib
+
+            logger.debug('Using GTK')
+            return True
+        except (ImportError, ValueError):
+            logger.exception('GTK cannot be loaded')
+            return False
+
+    def import_qt():
+        global guilib
+
+        try:
+            import webview.platforms.qt as guilib
+
+            return True
+        except (ImportError, ValueError):
+            logger.exception('QT cannot be loaded')
+            return False
+
+    def import_cocoa():
+        global guilib
+
+        try:
+            import webview.platforms.cocoa as guilib
+
+            return True
+        except (ImportError, ValueError):
+            logger.exception('PyObjC cannot be loaded')
+
+            return False
+
+    def import_winforms():
+        global guilib
+
+        try:
+            import webview.platforms.winforms as guilib
+
+            return True
+        except (ImportError, RuntimeError):
+            logger.exception('pythonnet cannot be loaded')
+            return False
+
+    def import_winui3():
+        global guilib
+
+        try:
+            import webview.platforms.winui3 as guilib
+
+            return True
+        except ImportError:
+            logger.exception('WinRT cannot be loaded')
+            return False
+
+    def try_import(guis: list[Callable[[], Any]]) -> bool:
+        while guis:
+            import_func = guis.pop(0)
+
+            if import_func():
+                return True
+
+        return False
+
+    global forced_gui_
+
+    if not forced_gui:
+        forced_gui = 'qt' if 'KDE_FULL_SESSION' in os.environ else None
+        forced_gui = cast(
+            GUIType,
+            os.environ['PYWEBVIEW_GUI'].lower()
+            if 'PYWEBVIEW_GUI' in os.environ and os.environ['PYWEBVIEW_GUI'].lower() in GUI_TYPES
+            else forced_gui,
+        )
+
+    forced_gui_ = forced_gui
+
+    if platform.system() == 'Darwin':
+        if forced_gui == 'qt':
+            guis = [import_qt, import_cocoa]
+        else:
+            guis = [import_cocoa, import_qt]
+
+        if not try_import(guis):
+            raise WebViewException(
+                'You must have either PyObjC (for Cocoa support) or Qt with Python bindings installed in order to use pywebview.'
+            )
+
+    elif hasattr(sys, 'getandroidapilevel'):
+        try_import([import_android])
+
+    elif platform.system() == 'Linux' or platform.system() == 'OpenBSD':
+        if forced_gui == 'qt':
+            guis = [import_qt, import_gtk]
+        else:
+            guis = [import_gtk, import_qt]
+
+        if not try_import(guis):
+            raise WebViewException(
+                'You must have either QT or GTK with Python extensions installed in order to use pywebview.'
+            )
+
+    elif platform.system() == 'Windows':
+        if forced_gui == 'qt':
+            guis = [import_qt, import_winforms, import_winui3]
+        elif forced_gui == 'winui3':
+            # Explicitly requested: don't silently fall back to WinForms if
+            # the WinUI 3 import fails, or callers asking for winui3 could
+            # unknowingly get a different renderer instead.
+            guis = [import_winui3]
+        elif forced_gui in ('cef', 'mshtml', 'edgechromium'):
+            # Explicitly requested a WinForms-family renderer: don't silently
+            # fall back to WinUI 3 if it fails to load either, for the same
+            # reason as the winui3 case above.
+            guis = [import_winforms]
+        else:
+            guis = [import_winforms, import_winui3]
+
+        if not try_import(guis):
+            if forced_gui == 'winui3':
+                # Only the winui3 extra could satisfy this branch — pythonnet
+                # wouldn't help, and mentioning it would send the user
+                # chasing the wrong dependency.
+                raise WebViewException(
+                    'You must have the pywebview[winui3] extra, the Edge WebView2 Runtime '
+                    'and Windows App Runtime installed, in order to use pywebview.'
+                )
+            elif forced_gui in ('cef', 'mshtml', 'edgechromium'):
+                # Only pythonnet could satisfy this branch — fallback to
+                # winui3 is intentionally disabled above, so mentioning its
+                # extra here would be equally misleading.
+                raise WebViewException(
+                    'You must have pythonnet installed in order to use pywebview.'
+                )
+            raise WebViewException(
+                'You must have pythonnet installed, or the pywebview[winui3] extra, the Edge '
+                'WebView2 Runtime and Windows App Runtime installed, in order to use pywebview.'
+            )
+    else:
+        raise WebViewException(
+            'Unsupported platform. Only Windows, Linux, OS X, OpenBSD are supported.'
+        )
+
+    assert guilib is not None
+    guilib.setup_app()
+    return guilib
