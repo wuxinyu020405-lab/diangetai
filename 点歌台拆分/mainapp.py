@@ -24,6 +24,7 @@ import overlay
 import settings
 import smtc
 import state
+import ui_ctk
 
 
 class _BudgetExceeded(Exception):
@@ -65,7 +66,7 @@ class MusicApp:
     def update_engine_badge(self, text, color):
         def _update():
             if hasattr(self, "lbl_engine_status"):
-                self.lbl_engine_status.config(text=text, fg=color)
+                ui_ctk.set_label(self.lbl_engine_status, text=text, color=color)
         self.root.after(0, _update)
 
     def player_is_busy(self):
@@ -106,7 +107,7 @@ class MusicApp:
             state.style_config.setdefault("global", {})["volume"] = v
             self.schedule_save_style()
             try:
-                self.lbl_volume_pct.config(text=f"{int(round(v * 100))}%")
+                ui_ctk.set_label(self.lbl_volume_pct, text=f"{int(round(v * 100))}%")
             except Exception:
                 pass
         else:
@@ -156,7 +157,7 @@ class MusicApp:
         if self.config.get("bili_cookie") and self.config.get("room_id"):
             bili_status = f"✅ 已配置 (房间号: {self.config['room_id']})"
             bili_color = "green"
-        self.lbl_bili_status.config(text=bili_status, fg=bili_color)
+        ui_ctk.set_label(self.lbl_bili_status, text=bili_status, color=bili_color)
 
         qq_status = "❌ 未登录"
         qq_color = "red"
@@ -169,377 +170,22 @@ class MusicApp:
                         qq_color = "green"
             except Exception:
                 pass
-        self.lbl_qq_status.config(text=qq_status, fg=qq_color)
+        ui_ctk.set_label(self.lbl_qq_status, text=qq_status, color=qq_color)
 
     def setup_ui(self):
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        top_frame = tk.Frame(self.root, bg="#f8f9fa", pady=5, padx=5)
-        top_frame.pack(fill=tk.X)
-        tk.Label(top_frame, text="📋 浏览器源:", bg="#f8f9fa", font=("微软雅黑", 10, "bold")).pack(side=tk.LEFT, padx=(0,5))
-        
-        tk.Button(top_frame, text="综合挂件", command=lambda: self.copy_to_clipboard("http://127.0.0.1:8080"), bg="#607D8B", fg="white").pack(side=tk.LEFT, padx=2)
-        tk.Button(top_frame, text="纯歌词", command=lambda: self.copy_to_clipboard("http://127.0.0.1:8080/lyric"), bg="#607D8B", fg="white").pack(side=tk.LEFT, padx=2)
-        tk.Button(top_frame, text="正在播放", command=lambda: self.copy_to_clipboard("http://127.0.0.1:8080/playing"), bg="#FF9800", fg="white").pack(side=tk.LEFT, padx=2)
-        tk.Button(top_frame, text="点歌列表", command=lambda: self.copy_to_clipboard("http://127.0.0.1:8080/queue"), bg="#4CAF50", fg="white").pack(side=tk.LEFT, padx=2)
-
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # === Tab 1: 运行日志 ===
-        tab_log = tk.Frame(notebook)
-        notebook.add(tab_log, text="📝 运行日志")
-        self.log_text = scrolledtext.ScrolledText(tab_log, font=("Consolas", 10), bg="#1e1e1e", fg="#00ff00", relief=tk.FLAT)
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # === Tab 2: 账号与登录 ===
-        tab_account = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_account, text="🔐 账号与登录")
-        account_inner = tk.Frame(tab_account, bg="#f0f0f0", padx=20, pady=20)
-        account_inner.pack(fill=tk.BOTH, expand=True)
-
-        bili_group = tk.LabelFrame(account_inner, text="B站直播间", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
-        bili_group.pack(fill=tk.X, pady=10)
-        self.lbl_bili_status = tk.Label(bili_group, text="⏳ 检测中...", font=("微软雅黑", 11), bg="#f0f0f0")
-        self.lbl_bili_status.pack(anchor="w", padx=10, pady=5)
-        tk.Button(bili_group, text="🔄 重新登录 B站", bg="#2196F3", fg="white", font=("微软雅黑", 10, "bold"), command=lambda: browserlogin.bilibili_auto_login(self)).pack(anchor="w", padx=10, pady=(0, 10))
-
-        qq_group = tk.LabelFrame(account_inner, text="QQ音乐账号", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
-        qq_group.pack(fill=tk.X, pady=10)
-        self.lbl_qq_status = tk.Label(qq_group, text="⏳ 检测中...", font=("微软雅黑", 11), bg="#f0f0f0")
-        self.lbl_qq_status.pack(anchor="w", padx=10, pady=5)
-        tk.Button(qq_group, text="📱 扫码登录 QQ 音乐", bg="#FF9800", fg="white", font=("微软雅黑", 10, "bold"), command=lambda: browserlogin.qq_scan_login(self)).pack(anchor="w", padx=10, pady=(0, 10))
-        tk.Button(account_inner, text="🔄 刷新状态", bg="#9E9E9E", fg="white", command=self.update_account_status).pack(pady=10)
-
-        # === Tab 3: 音质与缓存 ===
-        tab_basic = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_basic, text="🎵 音质与缓存")
-        basic_inner = tk.Frame(tab_basic, bg="#f0f0f0", padx=20, pady=20)
-        basic_inner.pack(fill=tk.BOTH, expand=True)
-
-        quality_group = tk.LabelFrame(basic_inner, text="点歌音质", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
-        quality_group.pack(fill=tk.X, pady=5)
-        tk.Label(quality_group, text="首选音质:", bg="#f0f0f0").grid(row=0, column=0, padx=10, pady=10, sticky="e")
-        self.var_audio_quality = tk.StringVar(value=settings.QUALITY_UI_MAP.get(settings.normalize_quality_key(state.style_config.get("audio_quality", "flac")), "FLAC 无损品质"))
-        self.combo_quality_top = ttk.Combobox(quality_group, textvariable=self.var_audio_quality, values=list(settings.QUALITY_UI_MAP.values()), state="readonly", width=25)
-        self.combo_quality_top.bind("<<ComboboxSelected>>", self.update_audio_quality)
-        self.combo_quality_top.grid(row=0, column=1, sticky="w")
-
-        # 第6步·高价值2：点歌播放音量（作用于 pygame，实时生效并持久化）
-        tk.Label(quality_group, text="点歌音量:", bg="#f0f0f0").grid(row=1, column=0, padx=10, pady=8, sticky="e")
-        _vrow = tk.Frame(quality_group, bg="#f0f0f0"); _vrow.grid(row=1, column=1, sticky="w")
-        self.scale_volume = tk.Scale(_vrow, from_=0, to=100, orient=tk.HORIZONTAL, length=180, showvalue=True,
-                                     bg="#f0f0f0", command=lambda e: self.apply_volume(slider_val=e))
-        self.scale_volume.set(int(round(self.get_volume() * 100)))
-        self.scale_volume.pack(side=tk.LEFT)
-        self.lbl_volume_pct = tk.Label(_vrow, text=f"{int(round(self.get_volume() * 100))}%", bg="#f0f0f0", width=5)
-        self.lbl_volume_pct.pack(side=tk.LEFT, padx=4)
-
-        path_group = tk.LabelFrame(basic_inner, text="本地客户端路径", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
-        path_group.pack(fill=tk.X, pady=5)
-        tk.Label(path_group, text="QQ音乐路径:", bg="#f0f0f0").pack(side=tk.LEFT, padx=10, pady=10)
-        self.entry_qq_path = tk.Entry(path_group, width=40, font=("微软雅黑", 9))
-        self.entry_qq_path.insert(0, self.config.get("qqmusic_path", ""))
-        self.entry_qq_path.pack(side=tk.LEFT, padx=5)
-        tk.Button(path_group, text="浏览...", command=self.browse_qq_path, bg="#9E9E9E", fg="white").pack(side=tk.LEFT, padx=5)
-
-        cache_group = tk.LabelFrame(basic_inner, text="缓存自动清理限制", bg="#f0f0f0", font=("微软雅黑", 10, "bold"))
-        cache_group.pack(fill=tk.X, pady=5)
-        tk.Label(cache_group, text="最多保留歌曲数:", bg="#f0f0f0").grid(row=0, column=0, padx=10, pady=5, sticky="e")
-        self.entry_max_files = tk.Entry(cache_group, width=10)
-        self.entry_max_files.insert(0, str(state.style_config.get("max_cache_files", 100)))
-        self.entry_max_files.grid(row=0, column=1, sticky="w")
-        self.entry_max_files.bind("<KeyRelease>", self.update_cache_settings)
-        
-        tk.Label(cache_group, text="最大占用体积(MB):", bg="#f0f0f0").grid(row=1, column=0, padx=10, pady=5, sticky="e")
-        self.entry_max_size = tk.Entry(cache_group, width=10)
-        self.entry_max_size.insert(0, str(state.style_config.get("max_cache_size_mb", 500)))
-        self.entry_max_size.grid(row=1, column=1, sticky="w")
-        self.entry_max_size.bind("<KeyRelease>", self.update_cache_settings)
-
-        # ==========================================
-        # Tab 4: 综合挂件设置
-        # ==========================================
-        tab_mixed = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_mixed, text="🎨 综合挂件")
-        mixed_inner = tk.Frame(tab_mixed, bg="#f0f0f0", padx=20, pady=20)
-        mixed_inner.pack(fill=tk.BOTH, expand=True)
-
-        self.var_mix_sp = tk.BooleanVar(value=state.style_config['mixed']['show_playing'])
-        self.var_mix_sl = tk.BooleanVar(value=state.style_config['mixed']['show_lyric'])
-        self.var_mix_sq = tk.BooleanVar(value=state.style_config['mixed']['show_queue'])
-        self.var_mix_bp = tk.BooleanVar(value=state.style_config['mixed']['bold_playing'])
-        self.var_mix_bl = tk.BooleanVar(value=state.style_config['mixed']['bold_lyric'])
-        self.var_mix_bq = tk.BooleanVar(value=state.style_config['mixed']['bold_queue'])
-
-        chk_frame = tk.Frame(mixed_inner, bg="#f0f0f0"); chk_frame.pack(fill=tk.X, pady=5)
-        tk.Checkbutton(chk_frame, text="显示【正在播放】", variable=self.var_mix_sp, command=lambda: self.update_mixed("show_playing", self.var_mix_sp.get()), bg="#f0f0f0").pack(side=tk.LEFT, padx=5)
-        tk.Checkbutton(chk_frame, text="显示【实时歌词】", variable=self.var_mix_sl, command=lambda: self.update_mixed("show_lyric", self.var_mix_sl.get()), bg="#f0f0f0").pack(side=tk.LEFT, padx=5)
-        tk.Checkbutton(chk_frame, text="显示【点歌列表】", variable=self.var_mix_sq, command=lambda: self.update_mixed("show_queue", self.var_mix_sq.get()), bg="#f0f0f0").pack(side=tk.LEFT, padx=5)
-
-        tk.Label(mixed_inner, text="--- 正在播放样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
-        f1 = tk.Frame(mixed_inner, bg="#f0f0f0"); f1.pack(fill=tk.X, pady=2)
-        self.combo_mix_font_playing = ttk.Combobox(f1, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif"], state="normal", width=22)
-        self.combo_mix_font_playing.set(state.style_config['mixed']['font_playing'])
-        self.combo_mix_font_playing.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("font_playing", self.combo_mix_font_playing.get()))
-        self.combo_mix_font_playing.bind("<KeyRelease>", lambda e: self.update_mixed("font_playing", self.combo_mix_font_playing.get()))
-        self.combo_mix_font_playing.pack(side=tk.LEFT, padx=2)
-        tk.Button(f1, text="颜色", command=lambda: self.pick_mixed("color_playing", "lbl_mix_color_playing"), bg="#e0e0e0").pack(side=tk.LEFT, padx=2)
-        self.lbl_mix_color_playing = tk.Label(f1, text=state.style_config['mixed']['color_playing'], bg=state.style_config['mixed']['color_playing'], width=7)
-        self.lbl_mix_color_playing.pack(side=tk.LEFT, padx=2)
-        tk.Label(f1, text="字号:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(3,1))
-        scale_sp = tk.Scale(f1, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_mixed("size_playing", int(e)), length=80, bg="#f0f0f0")
-        scale_sp.set(state.style_config['mixed']['size_playing'])
-        scale_sp.pack(side=tk.LEFT, padx=2)
-        tk.Checkbutton(f1, text="加粗", variable=self.var_mix_bp, command=lambda: self.update_mixed("bold_playing", self.var_mix_bp.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        # 第6步·修16.3-② + #3：图标与"正在播放:"文字分开控制
-        self.var_mix_icon = tk.BooleanVar(value=state.style_config['mixed'].get("show_icon", True))
-        tk.Checkbutton(f1, text="🎵", variable=self.var_mix_icon, command=lambda: self.update_mixed("show_icon", self.var_mix_icon.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        self.var_mix_pfx = tk.BooleanVar(value=state.style_config['mixed'].get("show_prefix", True))
-        tk.Checkbutton(f1, text="“…正在播放”字样", variable=self.var_mix_pfx, command=lambda: self.update_mixed("show_prefix", self.var_mix_pfx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-
-        tk.Label(mixed_inner, text="--- 实时歌词样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
-        f2 = tk.Frame(mixed_inner, bg="#f0f0f0"); f2.pack(fill=tk.X, pady=2)
-        self.combo_mix_font_lyric = ttk.Combobox(f2, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif"], state="normal", width=22)
-        self.combo_mix_font_lyric.set(state.style_config['mixed']['font_lyric'])
-        self.combo_mix_font_lyric.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("font_lyric", self.combo_mix_font_lyric.get()))
-        self.combo_mix_font_lyric.bind("<KeyRelease>", lambda e: self.update_mixed("font_lyric", self.combo_mix_font_lyric.get()))
-        self.combo_mix_font_lyric.pack(side=tk.LEFT, padx=2)
-        tk.Button(f2, text="颜色", command=lambda: self.pick_mixed("color_lyric", "lbl_mix_color_lyric"), bg="#e0e0e0").pack(side=tk.LEFT, padx=2)
-        self.lbl_mix_color_lyric = tk.Label(f2, text=state.style_config['mixed']['color_lyric'], bg=state.style_config['mixed']['color_lyric'], width=7)
-        self.lbl_mix_color_lyric.pack(side=tk.LEFT, padx=2)
-        tk.Label(f2, text="字号:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(3,1))
-        scale_sl = tk.Scale(f2, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_mixed("size_lyric", int(e)), length=80, bg="#f0f0f0")
-        scale_sl.set(state.style_config['mixed']['size_lyric'])
-        scale_sl.pack(side=tk.LEFT, padx=2)
-        eff_mix = ttk.Combobox(f2, values=["高清平滑滚动", "苹果景深滚动", "无滚动 (静态)"], state="readonly", width=11)
-        eff_mix_map = {"apple_hd": "高清平滑滚动", "apple_blur": "苹果景深滚动", "static": "无滚动 (静态)"}
-        eff_mix.set(eff_mix_map.get(state.style_config['mixed']['effect_lyric'], "无滚动 (静态)"))
-        eff_mix.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("effect_lyric", {"高清平滑滚动":"apple_hd", "苹果景深滚动":"apple_blur", "无滚动 (静态)":"static"}[eff_mix.get()]))
-        eff_mix.pack(side=tk.LEFT, padx=2)
-        tk.Checkbutton(f2, text="加粗", variable=self.var_mix_bl, command=lambda: self.update_mixed("bold_lyric", self.var_mix_bl.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        # 第6步·修16.3-③：综合挂件对齐独立设置（不再借用纯歌词页）
-        self.combo_mix_align = ttk.Combobox(f2, values=["居中", "左", "右"], state="readonly", width=6)
-        _malign = {"center": "居中", "left": "左", "right": "右"}.get(state.style_config['mixed'].get("align", "center"), "居中")
-        self.combo_mix_align.set(_malign)
-        self.combo_mix_align.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("align", {"居中": "center", "左": "left", "右": "right"}[self.combo_mix_align.get()]))
-        self.combo_mix_align.pack(side=tk.LEFT, padx=2)
-
-        # #2 综合源歌词行数：默认 0/1 = 仅当前行 + 下一行（共两行）
-        f2b = tk.Frame(mixed_inner, bg="#f0f0f0"); f2b.pack(fill=tk.X, pady=2)
-        tk.Label(f2b, text="上方已播行数:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
-        self.spin_mix_prev = tk.Spinbox(f2b, from_=0, to=5, width=4,
-                                        command=lambda: self.update_mixed("lines_prev", self._spin_int_or(self.spin_mix_prev, 0)))
-        self.spin_mix_prev.delete(0, tk.END); self.spin_mix_prev.insert(0, str(state.style_config['mixed'].get("lines_prev", 0)))
-        self.spin_mix_prev.bind("<KeyRelease>", lambda e: self.update_mixed("lines_prev", self._spin_int_or(self.spin_mix_prev, 0)))
-        self.spin_mix_prev.pack(side=tk.LEFT, padx=2)
-        tk.Label(f2b, text="下方未播行数:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
-        self.spin_mix_next = tk.Spinbox(f2b, from_=0, to=8, width=4,
-                                        command=lambda: self.update_mixed("lines_next", self._spin_int_or(self.spin_mix_next, 1)))
-        self.spin_mix_next.delete(0, tk.END); self.spin_mix_next.insert(0, str(state.style_config['mixed'].get("lines_next", 1)))
-        self.spin_mix_next.bind("<KeyRelease>", lambda e: self.update_mixed("lines_next", self._spin_int_or(self.spin_mix_next, 1)))
-        self.spin_mix_next.pack(side=tk.LEFT, padx=2)
-        tk.Label(f2b, text="（默认 0/1 = 当前行+下一行，无滚动）", bg="#f0f0f0", fg="#888").pack(side=tk.LEFT, padx=(6,0))
-
-        tk.Label(mixed_inner, text="--- 点歌列表样式 ---", bg="#f0f0f0", font=("微软雅黑", 9, "bold")).pack(anchor="w", pady=(10,0))
-        f3 = tk.Frame(mixed_inner, bg="#f0f0f0"); f3.pack(fill=tk.X, pady=2)
-        self.combo_mix_font_queue = ttk.Combobox(f3, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif"], state="normal", width=22)
-        self.combo_mix_font_queue.set(state.style_config['mixed']['font_queue'])
-        self.combo_mix_font_queue.bind("<<ComboboxSelected>>", lambda e: self.update_mixed("font_queue", self.combo_mix_font_queue.get()))
-        self.combo_mix_font_queue.bind("<KeyRelease>", lambda e: self.update_mixed("font_queue", self.combo_mix_font_queue.get()))
-        self.combo_mix_font_queue.pack(side=tk.LEFT, padx=2)
-        tk.Button(f3, text="颜色", command=lambda: self.pick_mixed("color_queue", "lbl_mix_color_queue"), bg="#e0e0e0").pack(side=tk.LEFT, padx=2)
-        self.lbl_mix_color_queue = tk.Label(f3, text=state.style_config['mixed']['color_queue'], bg=state.style_config['mixed']['color_queue'], width=7)
-        self.lbl_mix_color_queue.pack(side=tk.LEFT, padx=2)
-        tk.Label(f3, text="字号:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(3,1))
-        scale_sq = tk.Scale(f3, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_mixed("size_queue", int(e)), length=80, bg="#f0f0f0")
-        scale_sq.set(state.style_config['mixed']['size_queue'])
-        scale_sq.pack(side=tk.LEFT, padx=2)
-        tk.Checkbutton(f3, text="加粗", variable=self.var_mix_bq, command=lambda: self.update_mixed("bold_queue", self.var_mix_bq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        # 第6步·高价值3/5/6：综合挂件队列的条数上限/序号/请求者
-        f3b = tk.Frame(mixed_inner, bg="#f0f0f0"); f3b.pack(fill=tk.X, pady=2)
-        tk.Label(f3b, text="最多显示条数(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
-        self.spin_mix_items = tk.Spinbox(f3b, from_=0, to=100, width=5,
-                                         command=lambda: self.update_mixed("max_items", self._spin_int_or(self.spin_mix_items, 0)))
-        self.spin_mix_items.delete(0, tk.END); self.spin_mix_items.insert(0, str(state.style_config['mixed'].get("max_items", 0)))
-        self.spin_mix_items.bind("<KeyRelease>", lambda e: self.update_mixed("max_items", self._spin_int_or(self.spin_mix_items, 0)))
-        self.spin_mix_items.pack(side=tk.LEFT, padx=2)
-        self.var_mix_sidx = tk.BooleanVar(value=state.style_config['mixed'].get("show_index", True))
-        tk.Checkbutton(f3b, text="序号", variable=self.var_mix_sidx, command=lambda: self.update_mixed("show_index", self.var_mix_sidx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        self.var_mix_sreq = tk.BooleanVar(value=state.style_config['mixed'].get("show_requester", True))
-        tk.Checkbutton(f3b, text="请求者", variable=self.var_mix_sreq, command=lambda: self.update_mixed("show_requester", self.var_mix_sreq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        tk.Label(f3b, text="请求者分隔符:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
-        self.entry_mix_sep = tk.Entry(f3b, width=5, font=("微软雅黑", 9))
-        self.entry_mix_sep.insert(0, state.style_config['mixed'].get("requester_sep", "-"))
-        self.entry_mix_sep.bind("<KeyRelease>", lambda e: self.update_mixed("requester_sep", self.entry_mix_sep.get() or "-"))
-        self.entry_mix_sep.pack(side=tk.LEFT)
-        tk.Label(f3b, text="行最长(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
-        self.spin_mix_chars = tk.Spinbox(f3b, from_=0, to=120, width=5,
-                                         command=lambda: self.update_mixed("max_chars", self._spin_int_or(self.spin_mix_chars, 0)))
-        self.spin_mix_chars.delete(0, tk.END); self.spin_mix_chars.insert(0, str(state.style_config['mixed'].get("max_chars", 0)))
-        self.spin_mix_chars.bind("<KeyRelease>", lambda e: self.update_mixed("max_chars", self._spin_int_or(self.spin_mix_chars, 0)))
-        self.spin_mix_chars.pack(side=tk.LEFT, padx=2)
-
-        # ==========================================
-        # Tab 5: 纯歌词源设置（含对齐/动效/透明度 T-A；透明度同时作用于综合挂件歌词区）
-        # ==========================================
-        tab_lyric = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_lyric, text="🎤 纯歌词源")
-        lyric_inner = tk.Frame(tab_lyric, bg="#f0f0f0", padx=20, pady=20)
-        lyric_inner.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(lyric_inner, text="字体 (可手动输入):", bg="#f0f0f0").grid(row=0, column=0, padx=5, sticky="e")
-        self.combo_lyric_font = ttk.Combobox(lyric_inner, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif", "'KaiTi', sans-serif"], state="normal")
-        self.combo_lyric_font.set(state.style_config['lyric']['font'])
-        self.combo_lyric_font.bind("<<ComboboxSelected>>", lambda e: self.update_lyric("font", self.combo_lyric_font.get()))
-        self.combo_lyric_font.bind("<KeyRelease>", lambda e: self.update_lyric("font", self.combo_lyric_font.get()))
-        self.combo_lyric_font.grid(row=0, column=1, pady=5, sticky="w")
-
-        tk.Button(lyric_inner, text="修改歌词颜色", command=lambda: self.pick_lyric("color"), bg="#e0e0e0").grid(row=1, column=0, padx=5, pady=5)
-        self.lbl_lyric_color = tk.Label(lyric_inner, text=state.style_config['lyric']['color'], bg=state.style_config['lyric']['color'], width=10)
-        self.lbl_lyric_color.grid(row=1, column=1, sticky="w")
-
-        tk.Label(lyric_inner, text="歌词字号:", bg="#f0f0f0").grid(row=2, column=0, padx=5, sticky="e")
-        self.scale_lyric_size = tk.Scale(lyric_inner, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_lyric("size", int(e)))
-        self.scale_lyric_size.set(state.style_config['lyric']['size'])
-        self.scale_lyric_size.grid(row=2, column=1, sticky="w")
-
-        # 部署：对齐方式选择组件
-        tk.Label(lyric_inner, text="对齐方式:", bg="#f0f0f0").grid(row=3, column=0, padx=5, sticky="e")
-        self.combo_lyric_align = ttk.Combobox(lyric_inner, values=["居中对齐", "左对齐", "右对齐"], state="readonly")
-        align_map = {"center": "居中对齐", "left": "左对齐", "right": "右对齐"}
-        self.combo_lyric_align.set(align_map.get(state.style_config['lyric'].get("align", "center"), "居中对齐"))
-        self.combo_lyric_align.bind("<<ComboboxSelected>>", self.update_lyric_align)
-        self.combo_lyric_align.grid(row=3, column=1, sticky="w", pady=5)
-
-        tk.Label(lyric_inner, text="滚动效果:", bg="#f0f0f0").grid(row=4, column=0, padx=5, sticky="e")
-        self.combo_effect = ttk.Combobox(lyric_inner, values=["高清平滑滚动 (锐利)", "苹果景深滚动 (柔光)", "无滚动 (经典静态)"], state="readonly")
-        eff_map = {"apple_hd": "高清平滑滚动 (锐利)", "apple_blur": "苹果景深滚动 (柔光)", "static": "无滚动 (经典静态)"}
-        self.combo_effect.set(eff_map.get(state.style_config['lyric']['effect'], "高清平滑滚动 (锐利)"))
-        self.combo_effect.bind("<<ComboboxSelected>>", self.update_effect)
-        self.combo_effect.grid(row=4, column=1, sticky="w", pady=5)
-
-        tk.Label(lyric_inner, text="上方已播放行数:", bg="#f0f0f0").grid(row=5, column=0, padx=5, sticky="e")
-        self.scale_lyric_prev = tk.Scale(lyric_inner, from_=0, to=5, orient=tk.HORIZONTAL, command=lambda e: self.update_lyric("lines_prev", int(e)))
-        self.scale_lyric_prev.set(state.style_config['lyric']['lines_prev'])
-        self.scale_lyric_prev.grid(row=5, column=1, sticky="w")
-
-        tk.Label(lyric_inner, text="下方未播放行数:", bg="#f0f0f0").grid(row=6, column=0, padx=5, sticky="e")
-        self.scale_lyric_next = tk.Scale(lyric_inner, from_=1, to=8, orient=tk.HORIZONTAL, command=lambda e: self.update_lyric("lines_next", int(e)))
-        self.scale_lyric_next.set(state.style_config['lyric']['lines_next'])
-        self.scale_lyric_next.grid(row=6, column=1, sticky="w")
-
-        tk.Label(lyric_inner, text="纯音乐提示语:", bg="#f0f0f0").grid(row=7, column=0, padx=5, sticky="e")
-        self.entry_pure_music = tk.Entry(lyric_inner, width=25)
-        self.entry_pure_music.insert(0, state.style_config['lyric']['pure_text'])
-        self.entry_pure_music.grid(row=7, column=1, sticky="w", pady=5)
-        self.entry_pure_music.bind("<KeyRelease>", lambda e: self.update_lyric("pure_text", self.entry_pure_music.get()))
-
-        self.var_lyric_bold = tk.BooleanVar(value=state.style_config['lyric']['is_bold'])
-        tk.Checkbutton(lyric_inner, text="字体加粗", variable=self.var_lyric_bold, command=lambda: self.update_lyric("is_bold", self.var_lyric_bold.get()), bg="#f0f0f0").grid(row=8, column=1, sticky="w", pady=5)
-
-        # 第6步·高价值1：歌词整体透明度（T-A 等比缩放：只改变整体明暗，滚动层次保留；
-        # 纯歌词页与综合挂件共用本值）。#5：范围放宽到 10~200%，>100% 提亮非激活行
-        tk.Label(lyric_inner, text="歌词明暗(%):", bg="#f0f0f0").grid(row=9, column=0, padx=5, sticky="e")
-        self.scale_lyric_op = tk.Scale(lyric_inner, from_=10, to=200, orient=tk.HORIZONTAL,
-                                       command=lambda e: self.update_lyric("opacity", int(e) / 100.0))
-        self.scale_lyric_op.set(int(round(state.style_config['lyric'].get("opacity", 1.0) * 100)))
-        self.scale_lyric_op.grid(row=9, column=1, sticky="w")
-
-        # #6 行间距：line-height 百分比（默认 142 = 改造前观感）
-        tk.Label(lyric_inner, text="歌词行间距(%):", bg="#f0f0f0").grid(row=10, column=0, padx=5, sticky="e")
-        self.scale_lyric_lh = tk.Scale(lyric_inner, from_=100, to=400, orient=tk.HORIZONTAL,
-                                       command=lambda e: self.update_lyric("line_spacing", int(e)))
-        self.scale_lyric_lh.set(int(state.style_config['lyric'].get("line_spacing", 142)))
-        self.scale_lyric_lh.grid(row=10, column=1, sticky="w")
-
-        # ==========================================
-        # Tab 6: 正在播放源设置
-        # ==========================================
-        tab_playing = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_playing, text="📺 正在播放源")
-        playing_inner = tk.Frame(tab_playing, bg="#f0f0f0", padx=20, pady=20)
-        playing_inner.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(playing_inner, text="字体 (可手动输入):", bg="#f0f0f0").grid(row=0, column=0, padx=5, sticky="e")
-        self.combo_playing_font = ttk.Combobox(playing_inner, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif"], state="normal")
-        self.combo_playing_font.set(state.style_config['playing']['font'])
-        self.combo_playing_font.bind("<<ComboboxSelected>>", lambda e: self.update_playing("font", self.combo_playing_font.get()))
-        self.combo_playing_font.bind("<KeyRelease>", lambda e: self.update_playing("font", self.combo_playing_font.get()))
-        self.combo_playing_font.grid(row=0, column=1, pady=5, sticky="w")
-
-        tk.Button(playing_inner, text="修改颜色", command=lambda: self.pick_playing("color"), bg="#e0e0e0").grid(row=1, column=0, padx=5, pady=5)
-        self.lbl_playing_color = tk.Label(playing_inner, text=state.style_config['playing']['color'], bg=state.style_config['playing']['color'], width=10)
-        self.lbl_playing_color.grid(row=1, column=1, sticky="w")
-
-        tk.Label(playing_inner, text="字号:", bg="#f0f0f0").grid(row=2, column=0, padx=5, sticky="e")
-        self.scale_playing_size = tk.Scale(playing_inner, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_playing("size", int(e)))
-        self.scale_playing_size.set(state.style_config['playing']['size'])
-        self.scale_playing_size.grid(row=2, column=1, sticky="w")
-
-        self.var_show_prefix = tk.BooleanVar(value=state.style_config['playing']['show_prefix'])
-        tk.Checkbutton(playing_inner, text="显示“正在播放”前缀", variable=self.var_show_prefix, command=lambda: self.update_playing("show_prefix", self.var_show_prefix.get()), bg="#f0f0f0").grid(row=3, column=0, columnspan=2, sticky="w", pady=5)
-
-        self.var_playing_bold = tk.BooleanVar(value=state.style_config['playing']['is_bold'])
-        tk.Checkbutton(playing_inner, text="字体加粗", variable=self.var_playing_bold, command=lambda: self.update_playing("is_bold", self.var_playing_bold.get()), bg="#f0f0f0").grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
-
-        # ==========================================
-        # Tab 7: 点歌列表源设置
-        # ==========================================
-        tab_queue = tk.Frame(notebook, bg="#f0f0f0")
-        notebook.add(tab_queue, text="📜 点歌列表源")
-        queue_inner = tk.Frame(tab_queue, bg="#f0f0f0", padx=20, pady=20)
-        queue_inner.pack(fill=tk.BOTH, expand=True)
-
-        tk.Label(queue_inner, text="字体 (可手动输入):", bg="#f0f0f0").grid(row=0, column=0, padx=5, sticky="e")
-        self.combo_queue_font = ttk.Combobox(queue_inner, values=["'PingFang SC', 'Microsoft YaHei', sans-serif", "'Microsoft YaHei', sans-serif"], state="normal")
-        self.combo_queue_font.set(state.style_config['queue']['font'])
-        self.combo_queue_font.bind("<<ComboboxSelected>>", lambda e: self.update_queue("font", self.combo_queue_font.get()))
-        self.combo_queue_font.bind("<KeyRelease>", lambda e: self.update_queue("font", self.combo_queue_font.get()))
-        self.combo_queue_font.grid(row=0, column=1, pady=5, sticky="w")
-
-        tk.Button(queue_inner, text="修改颜色", command=lambda: self.pick_queue("color"), bg="#e0e0e0").grid(row=1, column=0, padx=5, pady=5)
-        self.lbl_queue_color = tk.Label(queue_inner, text=state.style_config['queue']['color'], bg=state.style_config['queue']['color'], width=10)
-        self.lbl_queue_color.grid(row=1, column=1, sticky="w")
-
-        tk.Label(queue_inner, text="字号:", bg="#f0f0f0").grid(row=2, column=0, padx=5, sticky="e")
-        self.scale_queue_size = tk.Scale(queue_inner, from_=15, to=80, orient=tk.HORIZONTAL, command=lambda e: self.update_queue("size", int(e)))
-        self.scale_queue_size.set(state.style_config['queue']['size'])
-        self.scale_queue_size.grid(row=2, column=1, sticky="w")
-
-        tk.Label(queue_inner, text="列表最多字数:", bg="#f0f0f0").grid(row=3, column=0, padx=5, sticky="e")
-        self.scale_max_chars = tk.Scale(queue_inner, from_=10, to=60, orient=tk.HORIZONTAL, command=lambda e: self.update_queue("max_chars", int(e)))
-        self.scale_max_chars.set(state.style_config['queue']['max_chars'])
-        self.scale_max_chars.grid(row=3, column=1, sticky="w", pady=5)
-
-        self.var_queue_bold = tk.BooleanVar(value=state.style_config['queue']['is_bold'])
-        tk.Checkbutton(queue_inner, text="字体加粗", variable=self.var_queue_bold, command=lambda: self.update_queue("is_bold", self.var_queue_bold.get()), bg="#f0f0f0").grid(row=4, column=0, columnspan=2, sticky="w", pady=5)
-
-        # 第6步·高价值3/5/6（点歌列表页一份）
-        qrow = tk.Frame(queue_inner, bg="#f0f0f0"); qrow.grid(row=5, column=0, columnspan=2, sticky="w", pady=5)
-        tk.Label(qrow, text="最多显示条数(0=不限):", bg="#f0f0f0").pack(side=tk.LEFT, padx=(2,1))
-        self.spin_q_items = tk.Spinbox(qrow, from_=0, to=100, width=5,
-                                       command=lambda: self.update_queue("max_items", self._spin_int_or(self.spin_q_items, 0)))
-        self.spin_q_items.delete(0, tk.END); self.spin_q_items.insert(0, str(state.style_config['queue'].get("max_items", 0)))
-        self.spin_q_items.bind("<KeyRelease>", lambda e: self.update_queue("max_items", self._spin_int_or(self.spin_q_items, 0)))
-        self.spin_q_items.pack(side=tk.LEFT, padx=2)
-        self.var_q_sidx = tk.BooleanVar(value=state.style_config['queue'].get("show_index", True))
-        tk.Checkbutton(qrow, text="序号", variable=self.var_q_sidx, command=lambda: self.update_queue("show_index", self.var_q_sidx.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        self.var_q_sreq = tk.BooleanVar(value=state.style_config['queue'].get("show_requester", True))
-        tk.Checkbutton(qrow, text="请求者", variable=self.var_q_sreq, command=lambda: self.update_queue("show_requester", self.var_q_sreq.get()), bg="#f0f0f0").pack(side=tk.LEFT)
-        tk.Label(qrow, text="分隔符:", bg="#f0f0f0").pack(side=tk.LEFT, padx=(6,1))
-        self.entry_q_sep = tk.Entry(qrow, width=5, font=("微软雅黑", 9))
-        self.entry_q_sep.insert(0, state.style_config['queue'].get("requester_sep", "-"))
-        self.entry_q_sep.bind("<KeyRelease>", lambda e: self.update_queue("requester_sep", self.entry_q_sep.get() or "-"))
-        self.entry_q_sep.pack(side=tk.LEFT)
-
+        """界面全部交给 ui_ctk（customtkinter 重写）。业务逻辑一律走既有回调。"""
+        try:
+            ui_ctk.build(self, self.root)
+        except Exception as e:
+            # 界面构建失败时给出可读错误，而不是静默白屏
+            import traceback
+            traceback.print_exc()
+            try:
+                from tkinter import messagebox
+                messagebox.showerror("界面初始化失败", f"{type(e).__name__}: {e}")
+            except Exception:
+                pass
         self.update_account_status()
-        
-        bottom_frame = tk.Frame(self.root, bg="#e0e0e0", pady=5)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        self.lbl_engine_status = tk.Label(bottom_frame, text="⏳ 正在检测音频驱动...", bg="#e0e0e0", fg="#555555", font=("微软雅黑", 9, "bold"))
-        self.lbl_engine_status.pack()
 
     # === 回调 ===
     def update_mixed(self, key, val): state.style_config["mixed"][key] = val; self.schedule_save_style()
@@ -565,20 +211,20 @@ class MusicApp:
         c = colorchooser.askcolor(title="选择颜色")[1]
         if c:
             state.style_config["mixed"][key] = c
-            getattr(self, lbl_name).config(bg=c, text=c)
+            ui_ctk.set_label(getattr(self, lbl_name), text=c, color=c, bg=c)
             self.schedule_save_style()
 
     def pick_lyric(self, key):
         c = colorchooser.askcolor(title="选择歌词颜色")[1]
-        if c: state.style_config["lyric"][key] = c; self.lbl_lyric_color.config(bg=c, text=c); self.schedule_save_style()
+        if c: state.style_config["lyric"][key] = c; ui_ctk.set_label(self.lbl_lyric_color, text=c, color=c, bg=c); self.schedule_save_style()
 
     def pick_playing(self, key):
         c = colorchooser.askcolor(title="选择播放颜色")[1]
-        if c: state.style_config["playing"][key] = c; self.lbl_playing_color.config(bg=c, text=c); self.schedule_save_style()
+        if c: state.style_config["playing"][key] = c; ui_ctk.set_label(self.lbl_playing_color, text=c, color=c, bg=c); self.schedule_save_style()
 
     def pick_queue(self, key):
         c = colorchooser.askcolor(title="选择列表颜色")[1]
-        if c: state.style_config["queue"][key] = c; self.lbl_queue_color.config(bg=c, text=c); self.schedule_save_style()
+        if c: state.style_config["queue"][key] = c; ui_ctk.set_label(self.lbl_queue_color, text=c, color=c, bg=c); self.schedule_save_style()
 
     def update_effect(self, event):
         val = self.combo_effect.get()
