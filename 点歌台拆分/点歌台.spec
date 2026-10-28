@@ -9,6 +9,10 @@
 """
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
 
+import glob
+import os
+import shutil
+
 datas = []
 binaries = []
 hiddenimports = []
@@ -39,6 +43,29 @@ try:
     print(f"[spec] selenium 子模块收集: {len(_sel)} 个")
 except Exception as e:
     print(f"[spec][WARN] collect_submodules(selenium) 失败: {e}")
+
+# pygame: collect_all 会漏掉部分 DLL（实测缺 libmodplug-1.dll、libopusfile-0.dll）。
+# 那两个是 SDL2_mixer 的解码/音乐模块依赖，缺了可能导致某些格式放不出来。
+try:
+    _pg_d, _pg_b, _pg_h = collect_all("pygame")
+    datas += _pg_d
+    binaries += _pg_b
+    hiddenimports += _pg_h
+    print(f"[spec] pygame 收集: datas={len(_pg_d)} binaries={len(_pg_b)}")
+except Exception as e:
+    print(f"[spec][WARN] collect_all(pygame) 失败: {e}")
+
+# 兜底：把 site-packages/pygame 下的所有 DLL 强制作为 binary 收集
+try:
+    import pygame as _pg
+    _pgdir = os.path.dirname(_pg.__file__)
+    _n = 0
+    for _dll in glob.glob(os.path.join(_pgdir, "*.dll")):
+        binaries.append((_dll, "pygame"))
+        _n += 1
+    print(f"[spec] pygame DLL 强制收集: {_n} 个")
+except Exception as e:
+    print(f"[spec][WARN] pygame DLL 强制收集失败: {e}")
 
 # ── 已知静态分析抓不到的动态导入 ──────────────────────────────────
 hiddenimports += [
@@ -166,16 +193,20 @@ coll = COLLECT(
 # 朋友的电脑上没有 selenium 缓存，Selenium Manager 需要联网下载驱动，
 # 而国内常连不上 msedgedriver 域名 → "打不开浏览器"。
 # 把驱动随包分发，start_driver 会优先用本地驱动，完全不依赖网络。
-import shutil as _shutil
-import os as _os
-
-_dist = _os.path.join(DISTPATH, "点歌台")
+_dist = os.path.join(DISTPATH, "点歌台")
 for _drv in ("msedgedriver.exe", "chromedriver.exe"):
-    _src = _os.path.join(SPECPATH, _drv)   # spec 与驱动同目录（点歌台拆分/）
-    if _os.path.exists(_src):
-        _dst = _os.path.join(_dist, _drv)
-        _os.makedirs(_dist, exist_ok=True)
-        _shutil.copy2(_src, _dst)
-        print(f"[spec] 已随包分发驱动: {_drv} ({_os.path.getsize(_src)//1024//1024} MB)")
+    _src = os.path.join(SPECPATH, _drv)   # spec 与驱动同目录（点歌台拆分/）
+    if os.path.exists(_src):
+        _dst = os.path.join(_dist, _drv)
+        os.makedirs(_dist, exist_ok=True)
+        shutil.copy2(_src, _dst)
+        print(f"[spec] 已随包分发驱动: {_drv} ({os.path.getsize(_src)//1024//1024} MB)")
+        # 写版本提示文件：让 get_driver_version 免启动子进程即可得知版本（防黑窗）
+        try:
+            _ver = "156.0.0.0"   # 与本包一致的驱动版本；如需精确可改为读 PE
+            with open(os.path.join(_dist, "driver_version.txt"), "w", encoding="utf-8") as _f:
+                _f.write(_ver)
+        except Exception:
+            pass
     else:
         print(f"[spec][WARN] 未找到 {_drv}，分发包将依赖 Selenium Manager 联网下载")

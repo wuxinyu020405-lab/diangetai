@@ -128,38 +128,119 @@ def get_default_browser_path():
     return None
 
 
+def _no_window_kwargs():
+    """子进程静默参数：禁止弹黑窗。
+    打包成 --windowed 程序后，任何 subprocess 调用都会弹出黑色控制台窗口，
+    即使加了 CREATE_NO_WINDOW 之外的参数也一样。必须显式指定。"""
+    if os.name != "nt":
+        return {}
+    si = None
+    try:
+        import subprocess as _sp
+        si = _sp.STARTUPINFO()
+        si.dwFlags |= _sp.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        return {"startupinfo": si, "creationflags": 0x08000000}  # CREATE_NO_WINDOW
+    except Exception:
+        return {}
+
+
 def get_browser_version(exe_path):
     """读取浏览器 exe 的主版本号（如 Edge 156.x → "156"）。失败返回 None。
-    用于判断本地驱动与浏览器是否匹配——版本不匹配时驱动会拒绝连接。"""
+
+    ★ 不再调用 powershell：那样每读一次就闪一个黑窗，体验极差。
+      改用纯 Python 读 PE 文件版本资源（零子进程、零黑窗）。
+    """
     if not exe_path or not os.path.exists(exe_path):
         return None
-    import subprocess
     try:
-        # PowerShell 读文件版本，比 WMI 快且不需要管理员
-        cmd = ('(Get-Item -LiteralPath "%s").VersionInfo.ProductVersion' % exe_path)
-        r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd],
-                           capture_output=True, text=True, timeout=15)
-        out = (r.stdout or "").strip()
-        if out:
-            return out.split(".")[0]
+        v = _pe_file_version(exe_path)
+        if v:
+            return v.split(".")[0]
     except Exception:
         pass
     return None
 
 
+def _pe_file_version(path):
+    """用 ctypes 读取 exe 的 VS_FIXEDFILEINFO，返回 "a.b.c.d" 或 None。
+    纯 Python/ctypes 实现，不启动任何子进程 → 不会闪黑窗。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        ver = ctypes.WinDLL("version")
+        size = ver.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return None
+        buf = ctypes.create_string_buffer(size)
+        if not ver.GetFileVersionInfoW(path, 0, size, buf):
+            return None
+        ptr, length = ctypes.c_void_p(), wintypes.UINT()
+        if not ver.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(length)):
+            return None
+
+        class VS_FIXEDFILEINFO(ctypes.Structure):
+            _fields_ = [
+                ("dwSignature", wintypes.DWORD),
+                ("dwStrucVersion", wintypes.DWORD),
+                ("dwFileVersionMS", wintypes.DWORD),
+                ("dwFileVersionLS", wintypes.DWORD),
+                ("dwProductVersionMS", wintypes.DWORD),
+                ("dwProductVersionLS", wintypes.DWORD),
+                ("dwFileFlagsMask", wintypes.DWORD),
+                ("dwFileFlags", wintypes.DWORD),
+                ("dwFileOS", wintypes.DWORD),
+                ("dwFileType", wintypes.DWORD),
+                ("dwFileSubtype", wintypes.DWORD),
+                ("dwFileDateMS", wintypes.DWORD),
+                ("dwFileDateLS", wintypes.DWORD),
+            ]
+
+        info = ctypes.cast(ptr, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+        ms, ls = info.dwFileVersionMS, info.dwFileVersionLS
+        return "%d.%d.%d.%d" % ((ms >> 16) & 0xFFFF, ms & 0xFFFF,
+                                (ls >> 16) & 0xFFFF, ls & 0xFFFF)
+    except Exception:
+        return None
+
+
 def get_driver_version(driver_path):
-    """运行 `驱动 --version` 读取驱动主版本号。失败返回 None。"""
+    """读取驱动主版本号。
+
+    ★ 不再运行 `drv --version`（会闪黑窗）：
+      改为从驱动所在路径推断——selenium 缓存的驱动路径形如
+      .../msedgedriver/win64/155.0.4283.62/msedgedriver.exe，版本号就在路径里。
+      我们随包分发的驱动直接按文件名旁的 version.txt 记录（见 _driver_version_hint）。
+    """
     if not driver_path or not os.path.exists(driver_path):
         return None
-    import subprocess
+
+    # ① 优先读同目录的版本说明（打包时写入）
     try:
-        r = subprocess.run([driver_path, "--version"],
-                           capture_output=True, text=True, timeout=15)
-        text = (r.stdout or "") + (r.stderr or "")
-        # 形如 "Microsoft Edge WebDriver 155.0.4283.62 (...)" 或 "ChromeDriver 156.0.8078.73"
-        for token in text.replace("(", " ").replace(")", " ").split():
-            if token[:1].isdigit() and "." in token:
-                return token.split(".")[0]
+        hint = os.path.join(os.path.dirname(driver_path), "driver_version.txt")
+        if os.path.exists(hint):
+            with open(hint, "r", encoding="utf-8") as f:
+                txt = f.read().strip()
+            if txt and txt[:1].isdigit():
+                return txt.split(".")[0]
+    except Exception:
+        pass
+
+    # ② 从 selenyuan 缓存风格路径里提取（.../win64/155.0.4283.62/xxx.exe）
+    try:
+        parts = os.path.normpath(driver_path).split(os.sep)
+        for seg in parts:
+            if seg[:1].isdigit() and seg.count(".") >= 2:
+                return seg.split(".")[0]
+    except Exception:
+        pass
+
+    # ③ 最后才读 PE 版本资源（驱动 exe 本身也有版本信息，同样零黑窗）
+    try:
+        v = _pe_file_version(driver_path)
+        if v:
+            return v.split(".")[0]
     except Exception:
         pass
     return None

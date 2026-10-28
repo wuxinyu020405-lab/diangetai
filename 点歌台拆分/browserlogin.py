@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import shutil
+import subprocess
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.edge.service import Service as EdgeService
@@ -116,14 +117,31 @@ def start_driver(log_fn=None):
     else:
         _log("[INFO] Chrome 本地驱动: 未放置")
 
+    # ── 静默启动参数：彻底消灭黑窗闪烁 ──────────────────────────
+    # 打包成 --windowed 后，Selenium 启动驱动会弹黑框。
+    # ⚠ 关键：selenium 4.x 传给 Popen 的是 `self.creation_flags`（带下划线），
+    #   不是 `creationflags` —— 写错名字完全无效（实测验证过）。
+    # selenium 自己会在 win32 下设 STARTUPINFO(SW_HIDE)，但 CREATE_NEW_CONSOLE
+    # 仍可能闪现；我们改用 CREATE_NO_WINDOW 覆盖它。
+    CREATE_NO_WINDOW = 0x08000000
+
+    def _silent_service(cls, exe_path):
+        svc = cls(executable_path=exe_path)
+        for attr in ("creation_flags", "creationflags"):
+            try:
+                setattr(svc, attr, CREATE_NO_WINDOW)
+            except Exception:
+                pass
+        return svc
+
     # 尝试顺序：匹配的本地驱动 → 自动管理
     plans = [
         ("Edge(本地驱动)", edge_ok,
-         lambda: webdriver.Edge(service=EdgeService(executable_path=edge_driver_path), options=make_edge_opts())),
+         lambda: webdriver.Edge(service=_silent_service(EdgeService, edge_driver_path), options=make_edge_opts())),
         ("Edge(自动管理)", bool(browser and browser[0] == "edge") or True,
          lambda: webdriver.Edge(options=make_edge_opts())),
         ("Chrome(本地驱动)", chrome_ok,
-         lambda: webdriver.Chrome(service=ChromeService(executable_path=chrome_driver_path), options=make_chrome_opts())),
+         lambda: webdriver.Chrome(service=_silent_service(ChromeService, chrome_driver_path), options=make_chrome_opts())),
         ("Chrome(自动管理)", True,
          lambda: webdriver.Chrome(options=make_chrome_opts())),
     ]
