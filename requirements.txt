@@ -6,7 +6,8 @@
 #   .venv\Scripts\activate
 #   pip install -r requirements.txt
 #   pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
-#   pip install "pywebview @ https://github.com/r0x0r/pywebview/archive/refs/heads/master.tar.gz"
+#   git clone --depth 1 https://github.com/r0x0r/pywebview
+#   pip install ./pywebview
 #
 # ⚠️ 不要加 --only-binary=:all:：proxy_tools 在 PyPI 上只有源码包（纯 Python，
 #   构建零风险），该约束会让 pip 直接拒绝解析（CI Run#1 就是这样 38 秒挂的）。
@@ -25,7 +26,9 @@
 #   三类错误之一，登录窗口直接挂（详见 打包说明.md 坑4）。
 #   API 表面（get_cookies 等）6.2.1 与 master 一致，静态检查看不出问题，
 #   必须实跑 --selftest 才能暴露 —— 别把它换回 PyPI 版。
-#   本机网络到 GitHub 不通时：先手动下载 tar.gz 再 pip install 本地路径。
+#   ⚠️ 必须 git clone 安装，不能用 archive tar.gz：master 用 setuptools_scm
+#   定版本，tar 包没有 .git 目录会导致构建失败（CI Run#2 实测）。
+#   本机到 GitHub 不通时：换网络/代理 clone，或在别的机器 clone 后拷目录。
 #
 # ── winsdk 注意 ───────────────────────────────────────────────────────
 #   winsdk 是预发布版，wheel 最高 cp312 → 本项目固定 Python 3.12。
