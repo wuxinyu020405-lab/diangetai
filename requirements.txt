@@ -4,9 +4,13 @@
 # ── 安装步骤 ──────────────────────────────────────────────────────────
 #   python -m venv .venv
 #   .venv\Scripts\activate
-#   pip install -r requirements.txt --only-binary=:all:
+#   pip install -r requirements.txt
 #   pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
 #   pip install "pywebview @ https://github.com/r0x0r/pywebview/archive/refs/heads/master.tar.gz"
+#
+# ⚠️ 不要加 --only-binary=:all:：proxy_tools 在 PyPI 上只有源码包（纯 Python，
+#   构建零风险），该约束会让 pip 直接拒绝解析（CI Run#1 就是这样 38 秒挂的）。
+#   历史上加它防的是 brotli 老版本无 cp312 wheel，现快照版本全有 wheel，不需要了。
 #
 # ── 为什么 blivedm 要单独用 --no-deps 装 ─────────────────────────────
 #   源码用的是 blivedm 老 API：BLiveClient.set_handler + 同步 _on_danmaku。

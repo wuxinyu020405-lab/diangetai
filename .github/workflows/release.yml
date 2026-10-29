@@ -23,7 +23,7 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt --only-binary=:all:
+          pip install -r requirements.txt
           pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
           pip install "pywebview @ https://github.com/r0x0r/pywebview/archive/refs/heads/master.tar.gz"
 
@@ -98,7 +98,9 @@ jobs:
             if (-not (Test-Path $p)) { Write-Error "缺 $p"; exit 1 }
           }
           # 真跑一次 --selftest：冻结环境里 9 个关键模块 + 内嵌浏览器全通才算合格
-          Start-Process "dist\点歌台\点歌台.exe" -ArgumentList '--selftest' -Wait -Timeout 180
+          $sp = Start-Process "dist\点歌台\点歌台.exe" -ArgumentList '--selftest' -PassThru
+          if (-not $sp.WaitForExit(240000)) { Write-Error "selftest 4 分钟未退出"; exit 1 }
+          Start-Sleep 2   # 等报告文件落盘句柄释放
           $rep = Get-Content "dist\点歌台\自检报告.txt" -Encoding UTF8 -Raw
           $rep | Out-File "$env:GITHUB_WORKSPACE\ci_selftest.txt" -Encoding utf8
           if ($rep -match 'FAIL|❌') { Write-Error "自检报告含 FAIL：见 ci_selftest.txt"; exit 1 }

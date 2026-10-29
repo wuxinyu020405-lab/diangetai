@@ -58,7 +58,7 @@ http://127.0.0.1:8080/queue     点歌列表
 
 ```powershell
 python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt --only-binary=:all:
+pip install -r requirements.txt
 pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
 pip install "pywebview @ https://github.com/r0x7/pywebview/archive/refs/heads/master.tar.gz"
 python 点歌台拆分\main.py            # 或 --selftest 做环境体检
