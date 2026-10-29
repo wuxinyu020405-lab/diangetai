@@ -140,6 +140,9 @@ hiddenimports += [
     # aiohttp 的 web 子模块
     "aiohttp",
     "aiohttp.web",
+    # blivedm 运行时依赖（--no-deps 装的，静态分析偶尔漏收；Run#9 教训）
+    "pure_protobuf",
+    "paho.mqtt.client",
     # 注意：selenium 已随登录改造移除（改用 pywebview 内嵌浏览器），
     #      不再需要任何 selenium hidden import。保留条目会让 PyInstaller
     #      去收集一个已不存在的包，产生 "hidden import not found" 噪声。

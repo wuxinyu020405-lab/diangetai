@@ -43,6 +43,10 @@ winsdk==1.0.0b10 ; sys_platform == "win32"
 qqmusic-api-python==0.8.2
 ply==3.11
 jsonpath-ng==1.14.0
+pure-protobuf==3.1.5       # blivedm 的运行时依赖（models/pb.py 直接 import）
+# ⚠️ blivedm 用 --no-deps 安装，它的运行时依赖必须在本文件手动列全：
+#    aiohttp / paho-mqtt / pure-protobuf / Brotli —— 漏一个 CI 上 exe 启动即崩
+#    （Run#9：漏 pure-protobuf，本机因 venv 里有而测不出）
 # blivedm / pywebview：不在此文件内，用上方两条单独命令安装（GitHub master）
 # （selenium 已随登录改造移除，不再需要）
 
