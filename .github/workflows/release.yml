@@ -21,27 +21,47 @@ jobs:
           python-version: "3.12"        # winsdk 只有 ≤cp312 的 wheel，勿升
 
       - name: 安装依赖
+        shell: cmd
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz"
-          # git clone（非 tarball）是硬要求：pywebview 用 setuptools_scm 定版本，
-          # GitHub archive 没有 .git 会构建失败（CI Run#2 的 59s 卡死即此因）
-          git clone --depth 1 https://github.com/r0x0r/pywebview _pywebview_src
-          pip install ./_pywebview_src
+          echo.> pip.log
+          python -m pip install --upgrade pip >> pip.log 2>&1 && ^
+          pip install -r requirements.txt >> pip.log 2>&1 && ^
+          pip install --no-deps "blivedm @ https://github.com/xfgryujk/blivedm/archive/refs/heads/master.tar.gz" >> pip.log 2>&1 && ^
+          git clone --depth 1 https://github.com/r0x0r/pywebview _pywebview_src >> pip.log 2>&1 && ^
+          pip install ./_pywebview_src >> pip.log 2>&1
+          if errorlevel 1 (
+            echo ==== pip.log 全文 ====
+            type pip.log
+            exit /b 1
+          )
+        # 说明：git clone 而非 tarball 是硬要求——pywebview 用 setuptools_scm
+        # 定版本，GitHub archive 没有 .git 会构建失败（CI Run#2 的 59s 卡死即此因）。
+        # cmd+&& 链保证退出码传播（pwsh 管道会吞码），失败时 type 全量日志进主日志。
 
-      - name: 校验 pywebview 是 master（PyPI 6.2.1 缺 PR#1832，登录必挂）
+      - name: 失败诊断注解
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path pip.log) {
+            $tail = (Get-Content pip.log -Tail 50) -join "`n"
+            $one = $tail -replace "`r?`n", "%0A" -replace "`|", "!"
+            "::notice title=pip.log 最后 50 行::$one"
+          } else { "::notice title=无pip.log::失败发生在安装依赖之外" }
+
+      - name: 记录 pywebview 版本（行为校验交给 selftest）
         shell: python
         run: |
           import importlib.metadata as m
           import sys
           try:
               v = m.version("pywebview")
-          except Exception:
-              print("::error::pywebview 未安装"); sys.exit(1)
+          except Exception as e:
+              print(f"::error::pywebview 元数据读取失败: {type(e).__name__}: {e}"); sys.exit(1)
           print("pywebview 版本:", v)
-          if v == "6.2.1":
-              print("::error::装到了 PyPI 6.2.1，登录功能会挂，必须用 GitHub master"); sys.exit(1)
+          print(f"::notice title=pywebview 版本::{v}")
+          # 不再断言"必须 != 6.2.1"：master HEAD 现即 v6.2.1 tag（setuptools_scm
+          # 生成精确版本号，CI Run#3 的误杀即此因）。登录是否可用由后面的
+          # exe --selftest 真实创建内嵌浏览器窗口来判定——行为校验优于静态猜测。
 
       - name: 校验 tag 与 version.py 一致
         shell: pwsh
