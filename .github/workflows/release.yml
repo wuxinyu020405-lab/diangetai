@@ -123,6 +123,9 @@ jobs:
 
       - name: 产物自检（exe 版本资源 + 冻结环境模块导入 + 内嵌浏览器）
         shell: pwsh
+        env:
+          # 双保险：exe 内 main.py 已 reconfigure stdout；这里再给进程环境兜底
+          PYTHONIOENCODING: utf-8
         run: |
           $v = (Get-Item "dist\点歌台\点歌台.exe").VersionInfo
           "FileVersion=$($v.FileVersion) ProductName=$($v.ProductName)"

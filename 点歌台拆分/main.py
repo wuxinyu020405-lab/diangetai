@@ -14,6 +14,16 @@ import time
 # 实测改用 coreclr 即恢复正常（源码运行与打包运行均已验证）。
 os.environ.setdefault("PYTHONNET_RUNTIME", "coreclr")
 
+# CI/管道环境下英文 Windows 默认编码(cp1252)编不了本文件的中文 print，
+# 直接 UnicodeEncodeError 崩溃（CI Run#10 实测：stdout 被重定向时炸在启动
+# 第一行）。环境变量为时已晚（stdout 已按 locale 绑定），必须运行时 reconfigure。
+# GUI 程序 print 只是日志副作用，UTF-8+replace 无害且防炸。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def _setup_dotnet_for_webview():
     """把 .NET 运行时位置准备好，让 coreclr 能找到 WindowsDesktop 共享框架。
