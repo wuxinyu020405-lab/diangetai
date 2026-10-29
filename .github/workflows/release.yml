@@ -130,12 +130,18 @@ jobs:
           foreach ($p in 'dist\点歌台\_internal','dist\点歌台\dotnet\shared','installer_out') {
             if (-not (Test-Path $p)) { Write-Error "缺 $p"; exit 1 }
           }
-          # 真跑一次 --selftest：冻结环境里关键模块 + 内嵌浏览器全通才算合格
-          $sp = Start-Process "dist\点歌台\点歌台.exe" -ArgumentList '--selftest' -PassThru
-          if (-not $sp.WaitForExit(240000)) { Write-Output "::error title=selftest超时::4分钟未退出"; exit 1 }
-          Start-Sleep 2   # 等报告文件落盘句柄释放
+          # 真跑一次 --selftest。Run#8 教训：windowed exe 在 CI 里 input() 拿不到
+          # EOF 会永远挂住 → 必须重定向空 stdin；超时强杀；判定以报告文件为准
+          # （报告在 input 等待之前就已落盘，进程被杀不影响结论）。
+          "" | Out-File -Encoding ascii empty.in
+          $sp = Start-Process "dist\点歌台\点歌台.exe" -ArgumentList '--selftest' -PassThru `
+                -RedirectStandardInput empty.in -RedirectStandardOutput selftest.out -RedirectStandardError selftest.err
+          if (-not $sp.WaitForExit(180000)) { Write-Output "::warning title=selftest进程超时::已强杀，改用报告文件判定"; $sp.Kill($true); Start-Sleep 2 }
           $repFile = "dist\点歌台\自检报告.txt"
-          if (-not (Test-Path $repFile)) { Write-Output "::error title=报告缺失::exe exit=$($sp.ExitCode) 且无报告文件"; exit 1 }
+          if (-not (Test-Path $repFile)) {
+            $errTail = if (Test-Path selftest.err) { (Get-Content selftest.err -Tail 25) -join " ⏎ " } else { "(无stderr)" }
+            Write-Output "::error title=报告缺失且无输出::exit=$($sp.ExitCode) err尾部: $($errTail -replace "`|",'!')"; exit 1
+          }
           $rep = Get-Content $repFile -Raw -Encoding UTF8
           # 报告全文压成注解（匿名可读；取头部 3500 字符，模块导入段在前）
           $one = ($rep -replace "`0", "" -replace "`r?`n", " ⏎ " -replace "`|", "!")
