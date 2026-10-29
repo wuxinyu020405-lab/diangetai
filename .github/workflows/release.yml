@@ -84,12 +84,16 @@ jobs:
 
       - name: PyInstaller 打包
         shell: pwsh
+        env:
+          # spec 里有中文 print；英文 Windows 默认 cp1252 会炸
+          # UnicodeEncodeError（Run#6 实测），强制 Python 输出 UTF-8
+          PYTHONIOENCODING: utf-8
         run: |
           python -m PyInstaller "点歌台拆分/点歌台.spec" --noconfirm --distpath dist --workpath build *> pyi.log
           if ($LASTEXITCODE -ne 0) {
             # 把报错尾部压成单行注解：annotations 端点匿名可读（主日志要登录看不到）
             $tail = (Get-Content pyi.log -Tail 50) -join "`n"
-            $one = ($tail -replace "`r?`n", " ⏎ " -replace "`|", "!")
+            $one = ($tail -replace "`0", "" -replace "`r?`n", " ⏎ " -replace "`|", "!")
             if ($one.Length -gt 3500) { $one = $one.Substring($one.Length - 3500) }
             Write-Output "::error title=PyInstaller 报错尾部::$one"
             exit 1
