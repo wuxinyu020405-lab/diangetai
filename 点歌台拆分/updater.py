@@ -23,7 +23,7 @@ import urllib.request
 
 import version
 
-REPO = "OWNER/REPO"          # ← 开源发布时改成实际 GitHub 仓库
+REPO = "wuxinyu020405-lab/diangetai"          # GitHub 仓库（owner/name）
 _API = "https://api.github.com/repos/{}/releases/latest".format(REPO)
 _UA = {"User-Agent": "DianGeTai-Updater", "Accept": "application/vnd.github+json"}
 
