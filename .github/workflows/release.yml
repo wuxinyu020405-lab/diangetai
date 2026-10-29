@@ -50,18 +50,23 @@ jobs:
 
       - name: 记录 pywebview 版本（行为校验交给 selftest）
         shell: python
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
+          # 本步骤所有输出必须纯 ASCII：python 步骤的 stdout 是重定向管道，
+          # Windows runner 默认 locale=cp1252，print 中文会抛 UnicodeEncodeError
+          # （Run#3/#4 都死在这——之前误判为 6.2.1 断言误杀，真凶是中文 print）
           import importlib.metadata as m
           import sys
           try:
               v = m.version("pywebview")
           except Exception as e:
-              print(f"::error::pywebview 元数据读取失败: {type(e).__name__}: {e}"); sys.exit(1)
-          print("pywebview 版本:", v)
-          print(f"::notice title=pywebview 版本::{v}")
-          # 不再断言"必须 != 6.2.1"：master HEAD 现即 v6.2.1 tag（setuptools_scm
-          # 生成精确版本号，CI Run#3 的误杀即此因）。登录是否可用由后面的
-          # exe --selftest 真实创建内嵌浏览器窗口来判定——行为校验优于静态猜测。
+              print("::error::pywebview metadata read failed: %s: %s" % (type(e).__name__, e))
+              sys.exit(1)
+          print("pywebview version: %s" % v)
+          print("::notice title=pywebview version::%s" % v)
+          # 不断言"!=6.2.1"：master HEAD 现即 v6.2.1 tag，setuptools_scm 生成
+          # 精确版本号。登录可用性由后面的 exe --selftest 真实行为判定。
 
       - name: 校验 tag 与 version.py 一致
         shell: pwsh
