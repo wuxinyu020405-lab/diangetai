@@ -38,16 +38,6 @@ jobs:
         # 定版本，GitHub archive 没有 .git 会构建失败（CI Run#2 的 59s 卡死即此因）。
         # cmd+&& 链保证退出码传播（pwsh 管道会吞码），失败时 type 全量日志进主日志。
 
-      - name: 失败诊断注解
-        if: failure()
-        shell: pwsh
-        run: |
-          if (Test-Path pip.log) {
-            $tail = (Get-Content pip.log -Tail 50) -join "`n"
-            $one = $tail -replace "`r?`n", "%0A" -replace "`|", "!"
-            "::notice title=pip.log 最后 50 行::$one"
-          } else { "::notice title=无pip.log::失败发生在安装依赖之外" }
-
       - name: 记录 pywebview 版本（行为校验交给 selftest）
         shell: python
         env:
@@ -93,7 +83,18 @@ jobs:
           "DOTNET_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: PyInstaller 打包
-        run: python -m PyInstaller "点歌台拆分/点歌台.spec" --noconfirm --distpath dist --workpath build
+        shell: pwsh
+        run: |
+          python -m PyInstaller "点歌台拆分/点歌台.spec" --noconfirm --distpath dist --workpath build *> pyi.log
+          if ($LASTEXITCODE -ne 0) {
+            # 把报错尾部压成单行注解：annotations 端点匿名可读（主日志要登录看不到）
+            $tail = (Get-Content pyi.log -Tail 50) -join "`n"
+            $one = ($tail -replace "`r?`n", " ⏎ " -replace "`|", "!")
+            if ($one.Length -gt 3500) { $one = $one.Substring($one.Length - 3500) }
+            Write-Output "::error title=PyInstaller 报错尾部::$one"
+            exit 1
+          }
+          "PyInstaller 完成"
 
       - name: 校验 dotnet 已随包（登录功能依赖，spec 漏了要立刻知道）
         shell: pwsh
