@@ -119,7 +119,7 @@ jobs:
 
       - name: 目录包 zip（免安装备用）
         shell: pwsh
-        run: Compress-Archive -Path "dist\点歌台\*" -DestinationPath "installer_out\点歌台_v${{ env.VERSION }}_portable.zip" -CompressionLevel Optimal
+        run: Compress-Archive -Path "dist\点歌台\*" -DestinationPath "installer_out\diangetai-v${{ env.VERSION }}-portable.zip" -CompressionLevel Optimal
 
       - name: 产物自检（exe 版本资源 + 冻结环境模块导入 + 内嵌浏览器）
         shell: pwsh
@@ -164,7 +164,7 @@ jobs:
       - name: 安装包冒烟（静默装 → 查文件 → 卸载 → 查残留）
         shell: pwsh
         run: |
-          $setup = (Get-ChildItem "installer_out\*_Setup_v*.exe" | Select-Object -First 1).FullName
+          $setup = (Get-ChildItem "installer_out\*Setup*.exe" | Select-Object -First 1).FullName
           $p = Start-Process $setup -ArgumentList '/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "安装失败 exit=$($p.ExitCode)"; exit 1 }
           $dst = "$env:LOCALAPPDATA\Programs\DianGeTai"
@@ -183,8 +183,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer_out/点歌台_Setup_v${{ env.VERSION }}.exe
-            installer_out/点歌台_v${{ env.VERSION }}_portable.zip
+            installer_out/diangetai-Setup-v${{ env.VERSION }}.exe
+            installer_out/diangetai-v${{ env.VERSION }}-portable.zip
           generate_release_notes: true
 
       - name: 手动触发时只存工件
