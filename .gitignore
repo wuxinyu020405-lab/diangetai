@@ -66,3 +66,7 @@ _probe_tone.wav
 _s1
 _s2
 *.log
+
+# 桌面歌词原型运行配置
+.desktop_lyric.json
+desktop_lyric.json

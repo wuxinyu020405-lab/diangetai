@@ -54,13 +54,28 @@ async def search_song(song_name, app_instance, retry=2):
 async def process_one_request(req, app_instance):
     """一首点歌的完整结论：就绪(入 playlist) / 失败(不入)。返回结论字符串。"""
     song_name = req["song_name"]; uname = req["uname"]
+
+    def notify(text):
+        """v1.1·#1 失败回执：只回失败、成功不打扰主播弹幕区；限频在 sender 内部，
+        被拦/无配置都静默，绝不影响点歌主流程。"""
+        sender = getattr(app_instance, "danmaku_sender", None)
+        if sender is not None:
+            try:
+                blocked = sender.send(text)
+                if blocked:
+                    app_instance.log("[回执未发] %s" % blocked)
+            except Exception as e:
+                app_instance.log("[WARN] 回执异常: %s" % e)
+
     if not state.qq_credential:
         app_instance.log(f"❌ 《{song_name}》 未登录QQ音乐，无法处理 (请求人:{uname})")
+        notify("@%s 主播还没登录QQ音乐，暂时点不了歌" % uname)
         return "no_credential"
 
     found = await search_song(song_name, app_instance)
     if not found:
         app_instance.log(f"❌ 《{song_name}》 没找到或解析失败 → 不入列 (请求人:{uname})")
+        notify("@%s 没搜到《%s》" % (uname, song_name[:12]))
         return "not_found"
     song_mid, real_name, singer_name, flac_size = found
     display_name = f"{real_name} {singer_name}"
@@ -75,6 +90,7 @@ async def process_one_request(req, app_instance):
     blocked = musiclib.quota_block_reason()
     if blocked:
         app_instance.log(f"⏸ 《{display_name}》暂不处理（{blocked}）→ 不入列 (请求人:{uname})")
+        notify("@%s 点歌排队中（%s）" % (uname, "今日额度用完" if "上限" in blocked else "冷却中，稍后再试"))
         return "quota_blocked"
 
     # 需求1：下载成功才入列
@@ -104,6 +120,7 @@ async def process_one_request(req, app_instance):
         "budget": "超出单首时间预算(可能网络慢/服务端拖)",
     }.get(reason, reason or "未知原因")
     app_instance.log(f"❌ 未入列: 《{display_name}》-{uname} 原因: {why}")
+    notify("@%s 《%s》点歌失败：%s" % (uname, real_name[:10], why.split("，")[0].split("(")[0]))
     return reason or "failed"
 
 

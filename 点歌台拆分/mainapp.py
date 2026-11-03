@@ -390,6 +390,10 @@ class MusicApp:
         else:
             for item in bili_cookie.split(';'):
                 if '=' in item: k, v = item.split('=', 1); cookies[k.strip()] = v.strip()
+        # v1.1·#8/#1：点歌失败回执通道（带限频）。房间号/ Cookie 齐了才启用。
+        import bilibili_send
+        self.danmaku_sender = bilibili_send.RateLimitedSender(
+            self.config.get('room_id', ''), bili_cookie, log=self.log)
                 
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Referer": f"https://live.bilibili.com/{self.config.get('room_id', '')}", "Origin": "https://live.bilibili.com"}
         

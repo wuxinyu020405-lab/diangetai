@@ -32,6 +32,55 @@ import state
 _webview = None
 _webview_patched = False
 
+# ── v1.1·B2：WinForms 未处理异常守卫 ──────────────────────────────
+# 现场（用户截图）：点登录时弹英文 "Unhandled exception ... Unable to cast
+# COM object ... ICoreWebView2Controller ... E_NOINTERFACE"。根因：WebView2
+# 运行库后台自动升级的窗口期内，EnsureCoreWebView2 的异步初始化在 UI 线程抛
+# COMException → CLR 弹自己的崩溃框。这不是 Python 异常，try/except 拦不到。
+# 解法：注册 WinForms.Application.ThreadException 处理器——异常被吞、记录、
+# 安静退出消息循环，调用方拿到失败后给用户中文指引。
+# 不做自动重试：pywebview 的 winforms 后端销毁窗口后不清全局 windows 列表
+# （只有 android 后端清），重试会走"子窗口"路径拿不到真窗口——重试交给用户
+# 再点一次按钮，安全。
+_thread_exc = {"info": None}
+_guard_installed = False
+
+
+def _install_winforms_guard():
+    """把 WinForms 英文崩溃框换成可控处理。尽力而为，装不上就维持现状。"""
+    global _guard_installed
+    if _guard_installed:
+        return True
+    try:
+        from webview._pythonnet import clr
+        clr.AddReference("System.Windows.Forms")
+        import System.Windows.Forms as WinForms
+        from System.Threading import ThreadExceptionEventHandler
+
+        def _on_thread_exc(sender, e):
+            try:
+                _thread_exc["info"] = str(e.Exception)
+            except Exception:
+                _thread_exc["info"] = "unknown"
+            print("[WARN] WebView2/WinForms UI 异常已拦截（B2 守卫）: %s" % _thread_exc["info"])
+            try:
+                WinForms.Application.Exit()   # 结束消息循环，wv.start() 随即返回
+            except Exception:
+                pass
+
+        try:
+            # 必须在消息循环启动前设置；循环已启动时会抛 InvalidOperationException，
+            # 此时跳过本行、仍继续挂处理器（处理器本身随时可挂）
+            WinForms.Application.SetUnhandledExceptionMode(WinForms.UnhandledExceptionMode.CatchException)
+        except Exception as ex:
+            print("[WARN] SetUnhandledExceptionMode 未生效(继续挂处理器): %s" % ex)
+        WinForms.Application.ThreadException += ThreadExceptionEventHandler(_on_thread_exc)
+        _guard_installed = True
+        return True
+    except Exception as ex:
+        print("[WARN] WinForms 异常守卫安装失败(维持默认行为): %s" % ex)
+        return False
+
 
 def _patch_pywebview_for_thread():
     """让 pywebview 能在非主线程运行 —— 本程序的 Tk 已占用主线程。
@@ -133,6 +182,8 @@ def _open_login_window(url, title, on_poll, timeout_sec=180, width=1100, height=
     """
     wv = _get_webview()
     done = {"ok": False, "value": None}
+    _thread_exc["info"] = None          # v1.1·B2：每次登录前清崩溃标志
+    _install_winforms_guard()           # v1.1·B2：把英文崩溃框换成可控处理
 
     cur_thread = threading.current_thread()
     old_name = cur_thread.name
@@ -192,6 +243,22 @@ def _open_login_window(url, title, on_poll, timeout_sec=180, width=1100, height=
     return done["value"] if done["ok"] else None
 
 
+def _report_login_window_failure(app_instance, result):
+    """v1.1·B2：登录窗口没拿到结果时，区分「WebView2 崩溃」与「超时/手动关闭」，
+    分别给中文指引。崩溃=守卫拦到了 UI 异常（_thread_exc 有值）。"""
+    if _thread_exc.get("info"):
+        msg = ("登录组件（WebView2）此刻不可用，通常是它在后台自动更新。\n\n"
+               "请稍等半分钟再点一次登录按钮即可；\n"
+               "若反复失败，更新一次 Edge 浏览器就能解决。")
+        app_instance.log("❌ 内嵌浏览器初始化失败（已拦截系统崩溃框，见弹窗说明）")
+        try:
+            app_instance.root.after(0, lambda: messagebox.showwarning("登录组件暂时不可用", msg))
+        except Exception:
+            pass
+        return
+    app_instance.log("❌ 等待登录超时或窗口被关闭。")
+
+
 # ================= B站登录 =================
 def bilibili_auto_login(app_instance):
     """对外入口：在独立线程里跑，避免阻塞 Tk 主线程。"""
@@ -226,7 +293,7 @@ def _bilibili_auto_login_worker(app_instance):
     )
 
     if not ok:
-        app_instance.log("❌ 等待登录超时或窗口被关闭。")
+        _report_login_window_failure(app_instance, ok)
         return
 
     cookie_dict = state_buf["cookie_dict"]
@@ -319,7 +386,7 @@ def _qq_scan_login_worker(app_instance):
                             on_poll, timeout_sec=120)
 
     if not ok:
-        app_instance.log("❌ 等待 QQ音乐登录超时或窗口被关闭。")
+        _report_login_window_failure(app_instance, ok)
         return
 
     try:
