@@ -20,6 +20,12 @@ class BiliHandler(blivedm.BaseHandler):
         if text == "切歌":
             if state.skip_event and not state.skip_event.is_set(): self.app.log("⏭️ 收到【切歌】指令！"); self.app.root.after(0, lambda: state.skip_event.set())
             return
+        # v1.1·N1：暂停/继续（精确匹配，防"暂停一下好吗"这类聊天误触；
+        # 与切歌同款 root.after 编组到 Tk 线程，复用 GUI 按钮同一入口保证行为一致）
+        if text == "暂停":
+            self.app.root.after(0, lambda: self.app.request_pause(True)); return
+        if text == "继续":
+            self.app.root.after(0, lambda: self.app.request_pause(False)); return
         if text.startswith("点歌"):
             song_name = text.replace("点歌", "").strip()
             if song_name: 

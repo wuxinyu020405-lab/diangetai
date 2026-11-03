@@ -79,6 +79,40 @@ class MusicApp:
         except Exception as e:
             print(f"[WARN] 窗口图标设置失败: {e}")
 
+    def request_pause(self, on):
+        """v1.1·N1：显式设置暂停意图（弹幕【暂停】/【继续】与 GUI 共用）。
+        语义（用户拍板）：只暂停当前这首歌的播放；下载与收队列照常。
+        必须在 Tk 线程调用（弹幕侧用 root.after 编组过来）。"""
+        if state.pause_event is None:
+            self.log("ℹ️ 播放引擎还没就绪，暂无法暂停")
+            return
+        if on:
+            if not state.current_song:
+                self.log("ℹ️ 当前没有在播的歌（暂停只对正在播放的歌曲生效）")
+                return
+            if not state.pause_event.is_set():
+                state.pause_event.set()
+        else:
+            # 无条件 clear：即使此刻没在播，解除意图也无害且符合"继续"预期
+            state.pause_event.clear()
+
+    def toggle_pause(self):
+        """GUI 按钮入口：按当前实际状态取反。"""
+        self.request_pause(not state.pause_event.is_set() if state.pause_event else True)
+
+    def update_pause_button(self):
+        """按钮文案跟随实际状态（在播放器线程里调用，after 回主线程）。"""
+        def _u():
+            if hasattr(self, "btn_pause"):
+                try:
+                    self.btn_pause.configure(text="▶ 继续播放" if state.paused else "⏸ 暂停播放")
+                except Exception:
+                    pass
+        try:
+            self.root.after(0, _u)
+        except Exception:
+            pass
+
     def update_engine_badge(self, text, color):
         def _update():
             if hasattr(self, "lbl_engine_status"):
@@ -223,6 +257,13 @@ class MusicApp:
         state.style_config["lyric"]["align"] = m.get(val, "center")
         self.schedule_save_style()
 
+    def update_queue_align(self, event):
+        """v1.1·N3：点歌列表挂件对齐。"""
+        val = self.combo_queue_align.get()
+        m = {"居中对齐": "center", "左对齐": "left", "右对齐": "right"}
+        state.style_config["queue"]["align"] = m.get(val, "left")
+        self.schedule_save_style()
+
     def pick_mixed(self, key, lbl_name):
         c = colorchooser.askcolor(title="选择颜色")[1]
         if c:
@@ -306,6 +347,7 @@ class MusicApp:
 
     async def main_async(self):
         global skip_event; state.skip_event = asyncio.Event()
+        state.pause_event = asyncio.Event()   # v1.1·N1
         self.log("正在启动 OBS 服务器...")
         web_app = web.Application()
         web_app.router.add_get('/', overlay.handle_index)
@@ -384,9 +426,13 @@ class MusicApp:
         while True:
             try:
                 if state.active_lrc_lines:
-                    if state.current_play_mode == "api" and self.player_is_busy():
+                    if state.current_play_mode == "api":
+                        # v1.1·B1续：不能用 player_is_busy() 做门槛——SDL 在 pause 期间
+                        # busy=False，旧逻辑会误落墙钟推算分支，导致"暂停时歌词继续跑"。
+                        # get_pos() 在暂停期间天然冻结（实测），正是我们要的行为；
+                        # 未播放时返回 -1，player_get_elapsed 内部已回落到墙钟。
                         elapsed = self.player_get_elapsed()
-                    else: 
+                    else:
                         elapsed = state.active_song_base_pos + (time.time() - state.active_song_start_ts)
                     
                     state.current_lyric_info = lyrics.get_current_lyric_state(state.active_lrc_lines, elapsed)
@@ -432,8 +478,16 @@ class MusicApp:
             print(f"[WARN] 异常已捕获: {e}")
 
         last_logged_key = ""; last_lyric_key = ""; last_smtc_pos = -1.0
+        prev_play_mode = state.current_play_mode   # v1.1·BGM回归无歌词修复
         while True:
             try:
+                # v1.1 修复：点歌播完恢复 BGM 时，本地播放器从暂停处继续=同一首歌，
+                # last_lyric_key 在 api 期间是陈旧的 → 旧逻辑判"没换歌"跳过取词，
+                # 而 active_lrc_lines 已被播放器清空 → 这一整首 OBS 没有歌词。
+                # 检测 api→local 回升，强制按"新歌"重走取词路径（位置由 SMTC 校准）。
+                if prev_play_mode != "local" and state.current_play_mode == "local":
+                    last_lyric_key = ""
+                prev_play_mode = state.current_play_mode
                 if state.current_play_mode == "local":
                     title, artist = "", ""; smtc_pos = None
                     if sessions_mgr:
@@ -462,8 +516,13 @@ class MusicApp:
                             if not lines:
                                 lines = [(0.0, state.style_config["lyric"].get("pure_text", "纯音乐, 请欣赏.."))]
                             if state.current_play_mode == "local" and last_lyric_key == track_key: state.active_lrc_lines = lines
-                        elif smtc_pos is not None and abs(smtc_pos - last_smtc_pos) > 1.5:
-                            last_smtc_pos = smtc_pos; state.active_song_base_pos = smtc_pos; state.active_song_start_ts = time.time()
+                        elif smtc_pos is not None:
+                            # v1.1·B1续：持续用 SMTC 真实位置校准墙钟推算。旧逻辑只在
+                            # smtc_pos 自身跳变>1.5s 时重同步，检测不到"外部暂停/拖进度条"
+                            # 造成的墙钟跑赢 SMTC（用户在 QQ音乐里暂停 BGM → 歌词跑飞）。
+                            est = state.active_song_base_pos + (time.time() - state.active_song_start_ts)
+                            if abs(smtc_pos - est) > 1.5:
+                                state.active_song_base_pos = smtc_pos; state.active_song_start_ts = time.time()
                     else:
                         state.system_media_info = {"title": "暂无播放", "artist": ""}
                         if last_lyric_key != "": last_lyric_key = ""; state.active_lrc_lines = []
@@ -745,7 +804,9 @@ class MusicApp:
                         state.active_song_start_ts = time.time()
                         state.active_song_base_pos = 0.0
 
-                        if not started or not self.player_is_busy():
+                        # v1.1·N1：load_and_play 内部起播后 0.4s 才查 busy；若这期间用户已按暂停，
+                        # busy=False 属正常而非"文件损坏"——必须排除暂停态，否则会误删缓存文件。
+                        if (not started or not self.player_is_busy()) and not state.pause_event.is_set():
                             self.log(f"⚠️ 播放瞬间结束，可能是文件损坏或解码异常，自动清理并跳过: {real_name}")
                             try:
                                 if os.path.exists(file_path): os.remove(file_path)
@@ -755,9 +816,38 @@ class MusicApp:
                             state.current_song = None; state.active_lrc_lines = []
                             continue
 
-                        while self.player_is_busy():
+                        # v1.1·N1 暂停状态机（实测 SDL：pause 期间 get_pos 冻结、get_busy=False）
+                        # 规则：暂停只停当前歌播放；下载/收队列不受影响；切歌优先并自动解除暂停。
+                        state.paused = False
+                        while True:
+                            if state.pause_event.is_set():
+                                if not state.paused:
+                                    try: pygame.mixer.music.pause()
+                                    except Exception as e: print(f"[WARN] 暂停失败: {e}")
+                                    state.paused = True
+                                    self.log("⏸️ 已暂停播放（点歌与下载照常排队；发【继续】或【切歌】恢复）")
+                                    self.update_pause_button()
+                                # 暂停中 busy=False，若不加这层保护会被当"播完"→提前恢复 BGM（实测坑）
+                                if state.skip_event.is_set():
+                                    state.skip_event.clear()
+                                    try: pygame.mixer.music.unpause()
+                                    except Exception: pass
+                                    self.player_stop()
+                                    state.paused = False
+                                    self.update_pause_button()
+                                    break
+                                await asyncio.sleep(0.25)
+                                continue
+                            if state.paused:   # 暂停态收到解除意图
+                                try: pygame.mixer.music.unpause()
+                                except Exception as e: print(f"[WARN] 恢复播放失败: {e}")
+                                state.paused = False
+                                self.log("▶️ 已恢复播放")
+                                self.update_pause_button()
                             if state.skip_event.is_set():
                                 self.player_stop(); state.skip_event.clear(); break
+                            if not self.player_is_busy():
+                                break   # 自然播完，走后面的队列空→恢复 BGM 逻辑
                             await asyncio.sleep(0.25)
                     except Exception as e:
                         self.log(f"❌ 播放失败: {type(e).__name__}: {e}")

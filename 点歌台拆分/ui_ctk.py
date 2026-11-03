@@ -121,6 +121,15 @@ def build(app, root):
                   text_color=("#334155", "white"),
                   command=lambda: updater.manual_check(app)).pack(side="left")
 
+    # ── v1.1·N1 暂停/继续按钮（pack 在 upd_bar 之后 → 显示其左侧）──
+    pause_bar = ctk.CTkFrame(top, fg_color="transparent")
+    pause_bar.pack(side="right")
+    app.btn_pause = ctk.CTkButton(pause_bar, text="⏸ 暂停播放", width=86, height=26, corner_radius=8,
+                  fg_color=("#F59E0B", "#B45309"), hover_color=("#D97706", "#92400E"), font=_font(11, True),
+                  text_color="white",
+                  command=app.toggle_pause)
+    app.btn_pause.pack(side="left", padx=(0, 8))
+
     for text, path, color in [
         ("综合挂件", "", ("#334155", "#1E293B")),
         ("纯歌词", "/lyric", ("#334155", "#1E293B")),
@@ -162,9 +171,12 @@ def build(app, root):
     pages = {n: tabs.tab(n) for n in PAGE_NAMES}
 
     def scroller(page):
-        # 不用 CTkScrollableFrame（每次切换要重算滚动区域，首建也慢）。
-        # 内容按 880x820 窗口高度设计，无需滚动；真需要时再换回。
-        f = ctk.CTkFrame(page, fg_color="transparent")
+        # v1.1·N2：换回 CTkScrollableFrame。当年弃用是因为日志页 CTkTextbox 的
+        # ~110ms 切换卡顿，而日志页早已换成原生 tk.Text（不走本函数）。
+        # 滚轮冲突已核对源码：_check_if_valid_scroll 沿 widget 树回溯，
+        # 只有鼠标悬停所在的那个滚动区响应，6 实例共存安全。
+        # width/height=0 → 随窗口自适应；内容超高自动出滚动条。
+        f = ctk.CTkScrollableFrame(page, fg_color="transparent", width=0, height=0)
         f.pack(fill="both", expand=True, padx=2, pady=2)
         return f
 
@@ -526,6 +538,13 @@ def build(app, root):
     app.scale_queue_size = ctk.CTkSlider(h, from_=15, to=80, width=220, number_of_steps=65,
         command=lambda v: app.update_queue("size", int(v)))
     app.scale_queue_size.set(qu.get("size", 36)); app.scale_queue_size.pack(side="left")
+    # v1.1·N3：点歌列表对齐（照纯歌词页模式）
+    h = _row(b, "对齐")
+    app.combo_queue_align = ctk.CTkComboBox(h, values=["左对齐", "居中对齐", "右对齐"], width=120,
+        font=_font(12), state="readonly", command=app.update_queue_align)
+    app.combo_queue_align.set({"center": "居中对齐", "left": "左对齐", "right": "右对齐"}.get(
+        qu.get("align", "left"), "左对齐"))
+    app.combo_queue_align.pack(side="left")
 
     b = _section(qsc, "内容")
     h = _row(b, "最多显示条数", "0 = 不限")

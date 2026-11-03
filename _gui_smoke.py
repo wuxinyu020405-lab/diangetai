@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
-"""GUI 冒烟：源码起进程 → 验证标题含 v1.0.0 → 二次启动被锁拒绝 → 关闭。"""
+"""GUI 冒烟：源码起进程 → 验证标题含当前版本号 → 二次启动被锁拒绝 → 关闭。"""
 import subprocess, sys, os, time, ctypes
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "点歌台拆分"))
+import version as _ver
+WANT_VER = _ver.DISPLAY   # 跟着 version.py 走，不硬编码
 
 HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "点歌台拆分")
 PY = sys.executable
@@ -30,8 +34,8 @@ try:
             break
     title = t[0] if t else "(窗口未出现)"
     print("窗口标题:", title)
-    has_ver = "v1.0.0" in title
-    print("标题含版本号:", "PASS" if has_ver else "FAIL")
+    has_ver = WANT_VER in title
+    print("标题含版本号(%s):" % WANT_VER, "PASS" if has_ver else "FAIL")
 
     # 二次启动：应弹"已经在运行"提示框，进程自行退出
     p2 = subprocess.Popen([PY, os.path.join(HERE, "main.py")], cwd=HERE)

@@ -16,6 +16,10 @@ current_song = None
 
 skip_event = None
 
+pause_event = None   # v1.1·N1：暂停意图（set=暂停当前歌播放；实测 pygame pause 期间 get_pos 冻结，歌词天然同步）
+
+paused = False       # 当前实际暂停态（GUI 按钮/日志用；只停播放，队列下载不受影响=用户拍板）
+
 app = None
 
 system_media_info = {"title": "暂无播放", "artist": ""}
@@ -56,7 +60,8 @@ style_config = {
         "font": "'PingFang SC', 'Microsoft YaHei', sans-serif",
         "color": "#FFFFFF", "size": 36, "max_chars": 30, "is_bold": False,
         "max_items": 0, "show_index": True,
-        "show_requester": True, "requester_sep": "-"
+        "show_requester": True, "requester_sep": "-",
+        "align": "left"          # v1.1·N3：点歌列表对齐（left/center/right，默认=旧行为左对齐）
     },
     "global": {"volume": 1.0},         # 第6步·高价值2：点歌播放音量（pygame）
     "audio_quality": "flac",

@@ -58,3 +58,6 @@ installer_out/
 _build*.log
 *.tmp
 
+
+# 歌词回归测试自造的静音 WAV（运行时生成，不入库）
+_probe_tone.wav

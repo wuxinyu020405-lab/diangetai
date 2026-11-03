@@ -217,6 +217,14 @@ let lastEffectMode = '';
 let lyricOpK = 1;   // 第6步·透明度T-A系数（0~1），由 applyLyricOpacity 统一设置
 let lyricLineH = 1.42;   // #6 行间距系数（line_spacing/100），由 updateData 设置
 
+// v1.1·H1 XSS 修复：所有外部数据（观众昵称/歌名/歌词行）进 innerHTML 前必须转义。
+// 不转义时，弹幕发「点歌 <img src=x onerror=...>」会被 OBS 网页当作指令执行。
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function applyLyricOpacity(k, spacing, container) {
     // 滚动模式：JS 用 lyricOpK 乘各行相对透明度
     // 静态模式：CSS 变量 --lyric-op-base/--lyric-op-active（0.5*k / 1*k，兜底=旧值）
@@ -242,7 +250,7 @@ function updateStaticLyric(lines, align) {
         let html = ''; 
         lines.forEach((l) => { 
             const cls = l.active ? 'lyric-line active' : 'lyric-line'; 
-            const txt = l.text || ''; 
+            const txt = escapeHtml(l.text || ''); 
             html += `<div class="${cls}">${txt || '&nbsp;'}</div>`; 
         }); 
         container.innerHTML = html; 
@@ -268,7 +276,7 @@ function updateMixedTwoLine(allLines, activeIdx, prevCount, nextCount, align) {
     let html = '';
     for (let i = start; i < end; i++) {
         const cls = (i === activeIdx) ? 'lyric-line active' : 'lyric-line';
-        html += `<div class="${cls}">${allLines[i] || '&nbsp;'}</div>`;
+        html += `<div class="${cls}">${escapeHtml(allLines[i]) || '&nbsp;'}</div>`;
     }
     container.innerHTML = html;
 }
@@ -464,7 +472,7 @@ async function updateData() {
                     let reqStr = (mReq && item.requester) ? (mSep + item.requester) : '';
                     let s = (mIdx ? `${index + 1}. ` : '') + item.display_name + reqStr;
                     if (mMax > 0 && s.length > mMax) s = s.substring(0, mMax) + '...';   // 第6步·修16.3-①
-                    html += `<li>${s}</li>`;
+                    html += `<li>${escapeHtml(s)}</li>`;   // v1.1·H1：先截断（按原文）后转义
                 });
                 ul.innerHTML = html;
             }
@@ -513,6 +521,9 @@ async function updateData() {
             ul.style.fontSize = cfg.queue.size + 'px';
             ul.style.color = cfg.queue.color;
             ul.style.fontWeight = cfg.queue.is_bold ? 'bold' : 'normal';
+            // v1.1·N3：点歌列表对齐。老配置无 align 字段 → 兜底 left = 旧行为不变
+            const qAlign = (['left','center','right'].indexOf(cfg.queue.align) >= 0) ? cfg.queue.align : 'left';
+            ul.style.textAlign = qAlign;
             const max = cfg.queue.max_chars || 999;
             // 第6步·高价值3/5/6（queue-only 页同样可配）
             const qItems = (cfg.queue.max_items && cfg.queue.max_items > 0) ? data.list.slice(0, cfg.queue.max_items) : data.list;
@@ -524,7 +535,7 @@ async function updateData() {
                 let html = ''; qItems.forEach((item, i) => {
                     let s = (qIdx ? `${i+1}. ` : '') + item.display_name + (qReq && item.requester ? qSep+item.requester : '');
                     if (s.length > max) s = s.substring(0, max) + '...';
-                    html += `<li>${s}</li>`;
+                    html += `<li>${escapeHtml(s)}</li>`;   // v1.1·H1
                 }); ul.innerHTML = html;
             }
         } 
