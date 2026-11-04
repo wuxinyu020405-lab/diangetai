@@ -5,6 +5,7 @@
 import inspect
 import os
 import pygame
+import secretstore
 import settings
 import state
 import ply                     # 原 L1：qqmusic_api→jsonpath_ng→ply 传递依赖
@@ -431,9 +432,8 @@ def load_quota_state():
     """把磁盘上的记账读回 state.quota_state；跨日自动归零。损坏文件容忍。"""
     st = state.quota_state
     try:
-        if os.path.exists(QUOTA_FILE):
-            with open(QUOTA_FILE, "r", encoding="utf-8") as f:
-                saved = _json.load(f)
+        saved = secretstore.read_json(QUOTA_FILE, default=None)
+        if isinstance(saved, dict):
             for k in ("date", "downloaded", "fail_streak", "cooldown_until"):
                 if k in saved:
                     st[k] = saved[k]
@@ -450,8 +450,7 @@ def load_quota_state():
 
 def save_quota_state():
     try:
-        with open(QUOTA_FILE, "w", encoding="utf-8") as f:
-            _json.dump(state.quota_state, f, ensure_ascii=False)
+        secretstore.write_json(QUOTA_FILE, state.quota_state)
     except Exception as e:
         print(f"[WARN] 配额记账保存失败: {e}")
 

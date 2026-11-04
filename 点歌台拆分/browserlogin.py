@@ -26,6 +26,7 @@ import os
 import sys
 
 import settings
+import secretstore
 import state
 
 # pywebview 延迟导入：打包时若缺依赖，顶多登录不能用，不影响主程序启动
@@ -326,19 +327,12 @@ def _bilibili_auto_login_worker(app_instance):
             print(f"[WARN] 查询直播间号失败: {e}")
 
     # ── 保存配置 ──
-    config = {}
-    if os.path.exists(settings.CONFIG_FILE):
-        try:
-            with open(settings.CONFIG_FILE, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except Exception:
-            pass
+    config = secretstore.read_json(settings.CONFIG_FILE, default={}) or {}
     config["bili_cookie"] = cookie_str
     if room_id:
         config["room_id"] = room_id
     try:
-        with open(settings.CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, ensure_ascii=False, indent=4)
+        secretstore.write_json(settings.CONFIG_FILE, config)
     except Exception as e:
         app_instance.log(f"❌ 保存配置失败: {e}")
         return
@@ -348,8 +342,8 @@ def _bilibili_auto_login_worker(app_instance):
         result_message = (f"B站 Cookie 和直播间号均已保存。\n直播间号：{room_id}\n\n"
                           f"请关闭并重新打开软件以应用配置。")
     else:
-        app_instance.log("❌ 未能自动获取直播间号，请手动在 config.json 中填写 room_id。")
-        result_message = "Cookie 已保存，但未能自动获取直播间号。请手动在 config.json 中填写 room_id。"
+        app_instance.log("❌ 未能自动获取直播间号，请在「账号登录」页的房间号输入框手动填写。")
+        result_message = "Cookie 已保存，但未能自动获取直播间号。\n请在「账号登录」页的房间号框手动填写后重启。"
 
     app_instance.root.after(0, lambda: app_instance.update_account_status())
     app_instance.root.after(0, lambda msg=result_message: messagebox.showinfo("B站登录结果", msg))

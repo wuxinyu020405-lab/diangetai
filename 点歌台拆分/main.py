@@ -24,6 +24,14 @@ try:
 except Exception:
     pass
 
+# ── v1.2.1·需求19：自动更新器 worker/孙进程分支 ────────────────────
+# `点歌台.exe --__upd__` = 更新器 worker；`--__upd_g__` = 换身孙进程。
+# 必须在一切重依赖（tkinter/ctk/pywebview/单实例锁）之前分叉：
+# 它们只干"等进程退→换/清文件"，不能碰弹幕锁、不能加载 GUI。
+if any(str(a).startswith("--__upd") for a in sys.argv):
+    import autoupdater
+    sys.exit(autoupdater.main())
+
 
 def _setup_dotnet_for_webview():
     """把 .NET 运行时位置准备好，让 coreclr 能找到 WindowsDesktop 共享框架。
@@ -177,7 +185,9 @@ def run_selftest():
     out("── 关键模块导入 ──")
     for m in ("webview", "clr", "pythonnet",
               "customtkinter", "pygame", "aiohttp", "blivedm",
-              "qqmusic_api", "winsdk.windows.media.control"):
+              "qqmusic_api", "winsdk.windows.media.control",
+              # v1.2.1：加密与自动更新（漏打包 = 装完直接崩，必须自检拦住）
+              "secretstore", "autoupdater"):
         try:
             importlib.import_module(m)
             out("  OK   " + m)
@@ -280,6 +290,17 @@ if __name__ == '__main__':
     # 启动时清理损坏文件
     print("[INFO] 启动时扫描缓存目录，清理损坏文件...")
     musiclib.clean_corrupted_files(settings.CACHE_DIR)
+
+    # v1.2.1·需求6：把历史明文配置就地迁移为 DPAPI 加密文件（透明，失败保持原样）
+    try:
+        import secretstore
+        for _p in (settings.CONFIG_FILE, settings.CREDENTIAL_FILE,
+                   os.path.join(settings.BASE_DIR, "quota_state.json")):
+            if secretstore.migrate_plaintext(_p):
+                print(f"[INFO] 已加密迁移: {os.path.basename(_p)}")
+    except Exception as _e:
+        print(f"[WARN] 配置加密迁移异常（不影响使用）: {_e}")
+
     settings.load_credential()
 
     if "--selftest" in sys.argv:
@@ -290,10 +311,12 @@ if __name__ == '__main__':
             time.sleep(8)
         sys.exit(0)
 
-    if os.path.exists(settings.CONFIG_FILE):
-        with open(settings.CONFIG_FILE, "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-    else:
+    try:
+        import secretstore
+        config_data = secretstore.read_json(settings.CONFIG_FILE, default=None)
+    except Exception:
+        config_data = None
+    if not isinstance(config_data, dict):
         config_data = {"room_id": "", "bili_cookie": "", "qqmusic_path": ""}
 
     if not _acquire_single_instance():
@@ -303,5 +326,19 @@ if __name__ == '__main__':
         except Exception:
             pass   # 无桌面会话等极端情况：静默退出即可
         sys.exit(0)
+
+    # v1.2.1·需求19续跑分支：上次用户选了"稍后更新"，marker 还在 →
+    # 本次启动让位：拉起更新器后立刻退出，更新器换完文件会重启新版。
+    try:
+        _upd_marker = os.path.join(settings.BASE_DIR, "_update_pending.json")
+        if os.path.exists(_upd_marker):
+            import updater as _upd
+            _upd._spawn_worker(settings.BASE_DIR, _upd_marker)
+            print("[INFO] 检测到待完成的更新，本次启动让位给更新器")
+            sys.exit(0)
+    except SystemExit:
+        raise
+    except Exception as _e:
+        print(f"[WARN] 更新续跑检查异常（照常启动主程序）: {_e}")
 
     launch_main_app(config_data)

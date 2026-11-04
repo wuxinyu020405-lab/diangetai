@@ -22,6 +22,7 @@ import danmaku
 import lyrics
 import musiclib
 import overlay
+import secretstore
 import settings
 import smtc
 import state
@@ -191,8 +192,7 @@ class MusicApp:
     def save_style_config(self):
         self.config["style_config"] = state.style_config
         try:
-            with open(settings.CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, ensure_ascii=False, indent=4)
+            secretstore.write_json(settings.CONFIG_FILE, self.config)
         except Exception as e:
             print("保存配置失败:", e)
 
@@ -211,15 +211,14 @@ class MusicApp:
 
         qq_status = "❌ 未登录"
         qq_color = "red"
-        if os.path.exists(settings.CREDENTIAL_FILE):
-            try:
-                with open(settings.CREDENTIAL_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if data.get("musicid") and data.get("musickey"):
-                        qq_status = f"✅ 已登录 (账号UID: {data['musicid']})"
-                        qq_color = "green"
-            except Exception:
-                pass
+        try:
+            # v1.2.1·需求6：经 secretstore 透明读（密文/明文兼容）
+            data = secretstore.read_json(settings.CREDENTIAL_FILE, default=None)
+            if data and data.get("musicid") and data.get("musickey"):
+                qq_status = f"✅ 已登录 (账号UID: {data['musicid']})"
+                qq_color = "green"
+        except Exception:
+            pass
         ui_ctk.set_label(self.lbl_qq_status, text=qq_status, color=qq_color)
 
     def setup_ui(self):

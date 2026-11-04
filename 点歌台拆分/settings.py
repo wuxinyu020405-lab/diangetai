@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from qqmusic_api import Client, Credential
+import secretstore
 import state
 import subprocess              # 原 L28：源码未使用，按纯搬家保留
 import urllib.parse            # 原 L16：源码未使用，按纯搬家保留
@@ -278,15 +279,15 @@ def save_startup_log(text, filename="启动日志.txt"):
         return None
 
 def save_credential(cred):
-    with open(CREDENTIAL_FILE, "w", encoding="utf-8") as f: json.dump({"musicid": cred.musicid, "musickey": cred.musickey}, f)
+    # v1.2.1·需求6：经 secretstore 写（DPAPI 可用则密文，否则明文回退）
+    secretstore.write_json(CREDENTIAL_FILE, {"musicid": cred.musicid, "musickey": cred.musickey})
 
 def load_credential():
     global qq_credential
-    if os.path.exists(CREDENTIAL_FILE):
-        with open(CREDENTIAL_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            state.qq_credential = Credential(musicid=data["musicid"], musickey=data["musickey"])
-            return True
+    data = secretstore.read_json(CREDENTIAL_FILE, default=None)
+    if data:
+        state.qq_credential = Credential(musicid=data["musicid"], musickey=data["musickey"])
+        return True
     return False
 
 def find_qqmusic_path():

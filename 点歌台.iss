@@ -42,11 +42,15 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Files]
 ; PyInstaller onedir 产物整体打入（排除运行残留）
-Source: "dist\点歌台\*"; DestDir: "{app}"; Excludes: "自检报告.txt,debug.log,_st.log,music_cache\*,config.json,credential.json,quota_state.json,启动日志.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\点歌台\*"; DestDir: "{app}"; Excludes: "自检报告.txt,debug.log,_st.log,music_cache\*,config.json,credential.json,quota_state.json,启动日志.txt,更新日志.txt,_update_pending.json,_update_dl\*,_update_staging\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; music_cache 空目录由程序自建，安装包不预置
+; 使用说明.md 由 spec 复制进 dist\点歌台\ 根，随上面通配进包（v1.2.1 需求20）
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+; v1.2.1·需求20：装完第一眼就能找到说明（开始菜单必有；勾桌面图标时桌面也放）
+Name: "{group}\使用说明"; Filename: "{app}\使用说明.md"
+Name: "{autodesktop}\使用说明"; Filename: "{app}\使用说明.md"; Tasks: desktopicon
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
@@ -61,3 +65,7 @@ Type: files; Name: "{app}\credential.json"
 Type: files; Name: "{app}\quota_state.json"
 Type: files; Name: "{app}\启动日志.txt"
 Type: files; Name: "{app}\自检报告.txt"
+Type: files; Name: "{app}\更新日志.txt"
+Type: files; Name: "{app}\_update_pending.json"
+Type: filesandordirs; Name: "{app}\_update_dl"
+Type: filesandordirs; Name: "{app}\_update_staging"

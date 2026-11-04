@@ -207,6 +207,17 @@ def build(app, root):
                   fg_color=ACCENT, hover_color=("#1D4ED8", "#60A5FA"),
                   command=lambda: browserlogin.bilibili_auto_login(app)).pack(anchor="w")
 
+    # v1.2.1·需求6：config.json 已 DPAPI 加密，不能再手改文件填 room_id，
+    # 这里补一个输入框（正常走登录会自动填，这里只作兜底/改号用）
+    h = _row(b, "房间号")
+    app.entry_bili_room = ctk.CTkEntry(h, width=200, font=_font(12),
+                                       placeholder_text="登录后自动获取，也可手填")
+    app.entry_bili_room.insert(0, str(app.config.get("room_id", "") or ""))
+    app.entry_bili_room.pack(side="left")
+    live_entry(app.entry_bili_room, lambda v: (app.config.__setitem__("room_id", v.strip()),
+                                               app.schedule_save_style(),
+                                               app.update_account_status()))
+
     # v1.2·抖音双平台监控：匿名免登录，只填房间号（live.douyin.com/ 后那串数字）
     b = _section(acct_sc, "抖音直播间", "匿名监控 · 免登录，重启生效")
     h = _row(b, "房间号")

@@ -188,6 +188,9 @@ hiddenimports += [
     "state", "settings", "lyrics", "musiclib", "overlay",
     "smtc", "browserlogin", "danmaku", "mainapp", "ui_ctk",
     "version", "updater",
+    # v1.2.1：配置加密 + 自动更新（main.py 的 if 分支里 import，静态能抓到，
+    # 但按项目惯例显式列出双保险）
+    "secretstore", "autoupdater",
     # 抖音 provider 是函数内 import（main_async 里），静态分析抓不到，必须显式列，
     # 否则打包版启用抖音直接 ModuleNotFoundError
     "live_providers", "live_providers.douyin",
@@ -244,6 +247,16 @@ coll = COLLECT(
     upx=False,
     name="点歌台",
 )
+
+# ── 使用说明随包（v1.2.1 需求20：装完必须有说明可看）──────────────
+# 仓库根的 使用说明.md → dist\点歌台\使用说明.md（Inno [Files] 与 portable
+# zip 都从这里取材；更新白名单也含它，升级时自动刷新说明）
+_doc = os.path.join(os.path.dirname(SPECPATH), "使用说明.md")
+if os.path.exists(_doc):
+    shutil.copy2(_doc, os.path.join(DISTPATH, "点歌台", "使用说明.md"))
+    print("[spec] 使用说明.md 已随包")
+else:
+    print("[spec][WARN] 仓库根缺 使用说明.md，包内将没有使用说明")
 
 # ── 抖音签名壳复制到 exe 同级 douyin_sign/（用户往这里放 sign.js 最直观）──
 # datas 已把它带进 _internal，但用户看不到 _internal；再复制一份到 exe 旁，

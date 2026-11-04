@@ -76,3 +76,12 @@ douyin_sign/sign.js
 douyin_sign/node_modules/
 douyin_sign/package-lock.json
 _spike_feed.txt
+
+# v1.2.1 自动更新运行期产物（下载暂存/待更新标记/更新日志，绝不入库）
+_update_pending.json
+_update_dl/
+_update_staging/
+更新日志.txt
+
+# 回归测试临时目录
+_test_tmp_*/
