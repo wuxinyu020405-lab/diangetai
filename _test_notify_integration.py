@@ -53,6 +53,21 @@ async def main():
     # ⑤ 回执文案 ≤40 字（B站上限，sender 内部也会截，双保险）
     ck("⑤ 文案不超长", all(len(t) <= 40 for t in s.sent + s2.sent), [len(t) for t in s.sent + s2.sent])
 
+    # ⑥ v1.2·防串台：抖音点歌失败 → 不发 B站回执（sender 零调用），但日志有失败结论
+    s6 = FakeSender(); app6 = App(s6)
+    danmaku.search_song = fake_search
+    r = await danmaku.process_one_request({"song_name": "x", "uname": "抖音小明", "platform": "douyin"}, app6)
+    danmaku.search_song = old
+    ck("⑥ 抖音失败不发B站回执", r == "not_found" and len(s6.sent) == 0,
+       "sent=%s" % s6.sent)
+    ck("⑥ 抖音失败仍进主播日志", any("未入列" in m or "没找到" in m for m in app6.logs), app6.logs)
+
+    # ⑦ 无 platform 字段（旧格式/其它来源）→ 默认按 bilibili 处理，回执照发（向后兼容）
+    s7 = FakeSender(); app7 = App(s7)
+    state.qq_credential = None
+    r = await danmaku.process_one_request({"song_name": "y", "uname": "老请求"}, app7)
+    ck("⑦ 缺 platform 默认B站可回执", r == "no_credential" and len(s7.sent) == 1, s7.sent)
+
 asyncio.run(main())
 bad = results.count(False)
 print("结论:", "✅ #1 集成回归 %d/%d 全过" % (len(results), len(results)) if bad == 0 else "❌ 失败 %d 项" % bad)

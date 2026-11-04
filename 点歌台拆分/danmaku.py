@@ -37,7 +37,7 @@ def handle_message(app, text, uname, platform="bilibili"):
         if song_name:
             app.log("%s收到点歌请求: %s - %s" % (tag, song_name, uname))
             # 需求3：不再并发起 task，只入待处理队列，由 song_request_worker 串行消费
-            state.pending_requests.append({"song_name": song_name, "uname": uname})
+            state.pending_requests.append({"song_name": song_name, "uname": uname, "platform": platform})
 
 
 class BiliHandler(blivedm.BaseHandler):
@@ -68,10 +68,16 @@ async def search_song(song_name, app_instance, retry=2):
 async def process_one_request(req, app_instance):
     """一首点歌的完整结论：就绪(入 playlist) / 失败(不入)。返回结论字符串。"""
     song_name = req["song_name"]; uname = req["uname"]
+    platform = req.get("platform", "bilibili")
 
     def notify(text):
         """v1.1·#1 失败回执：只回失败、成功不打扰主播弹幕区；限频在 sender 内部，
-        被拦/无配置都静默，绝不影响点歌主流程。"""
+        被拦/无配置都静默，绝不影响点歌主流程。
+        v1.2·修串台：回执通道是 B站专用（danmaku_sender 绑死 B站房间+Cookie），
+        抖音等非B站平台的失败只记主播日志、不发弹幕——抖音发弹幕接口未接入，
+        若误发会把「抖音观众小明失败」的消息串到 B站直播间去。"""
+        if platform != "bilibili":
+            return
         sender = getattr(app_instance, "danmaku_sender", None)
         if sender is not None:
             try:
