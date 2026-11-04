@@ -70,3 +70,9 @@ _s2
 # 桌面歌词原型运行配置
 .desktop_lyric.json
 desktop_lyric.json
+
+# 抖音签名产物版权归字节跳动，不入库（用户自行获取，同 DanmuFree 法律姿态）
+douyin_sign/sign.js
+douyin_sign/node_modules/
+douyin_sign/package-lock.json
+_spike_feed.txt
