@@ -16,6 +16,8 @@ import argparse
 import json
 import os
 import sys
+import threading
+import time
 import tkinter as tk
 import urllib.request
 
@@ -34,6 +36,86 @@ DEFAULTS = {
     "port": 0,                    # 0=自动探测
 }
 KEY_COLOR = "#010101"             # 色键（近纯黑；歌词配色避开它即可）
+HOTKEY_ID = 1                     # RegisterHotKey 的 id（本进程内唯一）
+_MOD = 0x0002 | 0x0001            # MOD_CONTROL | MOD_ALT
+_MODS = 0x0002 | 0x0001 | 0x0004  # + MOD_SHIFT
+# 候选组合（依次尝试，第一个注册成功即用——某些软件会占用常见组合，
+# 如本机 Ctrl+Alt+L 被占；从根上保证"总有可用热键 → 穿透永不锁死"）
+HOTKEY_CANDIDATES = [
+    (_MOD,  0x4C, "Ctrl+Alt+L"),
+    (_MOD,  0x44, "Ctrl+Alt+D"),
+    (_MODS, 0x4C, "Ctrl+Alt+Shift+L"),
+    (_MOD,  0x7B, "Ctrl+Alt+F12"),
+    (_MODS, 0x7B, "Ctrl+Alt+Shift+F12"),
+]
+
+
+class _HotkeyThread(threading.Thread):
+    """系统级全局热键线程：穿透态下窗口收不到任何键鼠，靠全局热键恢复。
+    核心不变量：注册失败 = 拒绝进入穿透态（从根上杜绝锁死）。
+
+    关键实现点：RegisterHotKey 第一参传 None → 热键消息投递到**本线程**队列
+    （若传 Tk 的 HWND，消息会进 Tk 主线程队列，本线程 PeekMessage 永远取不到）。
+    同理 PeekMessage 的 hwnd 也传 None=收本线程所有消息。"""
+
+    def __init__(self, on_fire):
+        super().__init__(daemon=True)
+        self.on_fire = on_fire
+        self._stop = threading.Event()
+        self._registered = False
+        self._label = ""
+
+    def run(self):
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        WM_HOTKEY = 0x0312
+        try:
+            # 关键顺序：RegisterHotKey(NULL) 要求调用线程**已有消息队列**，
+            # 而队列是第一次 PeekMessage/GetMessage 时才隐式创建的。
+            # 先 PM_NOREMOVE(2) 取一次空消息把队列建起来，再注册热键。
+            dummy = wintypes.MSG()
+            user32.PeekMessageW(ctypes.byref(dummy), None, 0, 0, 2)  # PM_NOREMOVE
+            # 依次尝试候选组合，第一个成功即用（常见组合可能被别的软件占用）
+            chosen = None
+            for mod, vk, label in HOTKEY_CANDIDATES:
+                if user32.RegisterHotKey(None, HOTKEY_ID, mod, vk):
+                    chosen = label
+                    break
+            if chosen is None:
+                return
+            self._label = chosen
+            self._registered = True
+            msg = wintypes.MSG()
+            while not self._stop.is_set():
+                if user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1):
+                    if msg.message == WM_HOTKEY and msg.wParam == HOTKEY_ID:
+                        try:
+                            self.on_fire()
+                        except Exception:
+                            pass
+                time.sleep(0.05)
+        except Exception:
+            self._registered = False
+        finally:
+            try:
+                if self._registered:
+                    user32.UnregisterHotKey(None, HOTKEY_ID)
+            except Exception:
+                pass
+
+    def stop(self):
+        self._stop.set()
+
+    @property
+    def registered(self):
+        """热键是否注册成功（线程启动后数毫秒内确定）。"""
+        return self._registered
+
+    @property
+    def label(self):
+        """实际生效的热键组合名（UI 提示用）。"""
+        return self._label
 
 
 def load_conf():
@@ -142,10 +224,16 @@ class DesktopLyric:
         self.cur_lbl.bind("<Button-1>", self._drag_start)
         self.song_lbl.bind("<Button-1>", self._drag_start)
         root.bind("<MouseWheel>", self._wheel)
-        root.bind("c", lambda e: self.set_click_through(not cfg["click_through"]))
+        root.bind("c", lambda e: self.toggle_click_through())
         root.bind("s", self._toggle_bar)
         root.bind("<Escape>", lambda e: root.destroy())
         self._dx = self._dy = 0
+
+        # 全局热键 Ctrl+Alt+L：穿透态下窗口收不到任何键鼠，这是唯一不依赖本窗口的退路
+        self._hotkey_fired = False
+        self._hk = _HotkeyThread(on_fire=lambda: setattr(self, "_hotkey_fired", True))
+        self._hk.start()
+
         self._apply_click_through()
 
         self._tick()
@@ -164,6 +252,14 @@ class DesktopLyric:
 
     def _tick(self):
         st = fetch_state(self.port) if self.port else None
+        # 全局热键 Ctrl+Alt+L：穿透态下唯一不依赖本窗口的退路（线程置标志，这里消费）
+        if self._hotkey_fired:
+            self._hotkey_fired = False
+            if self.cfg["click_through"]:
+                self.cfg["click_through"] = False
+                self._apply_click_through()
+                save_conf(self.cfg)
+                self._set_status("穿透已关 · 鼠标恢复")
         if st is None:
             if self.port is None:
                 self.port = probe_port(self.cfg.get("port") or 0)
@@ -193,14 +289,35 @@ class DesktopLyric:
         self._restyle()
         save_conf(self.cfg)
 
-    def set_click_through(self, on):
-        self.cfg["click_through"] = on
-        self._apply_click_through()
+    def _set_status(self, msg):
+        """更新状态标签；穿透相关提示自动弹出设置条，确保用户看得见。"""
+        try:
+            self._bar_status.configure(text=msg)
+            if not self.bar.winfo_manager():
+                self.bar.pack(anchor="w", fill="x", padx=14, pady=(2, 6))
+        except Exception:
+            pass
+
+    def toggle_click_through(self):
+        """切换穿透态。核心不变量：热键未就绪 → 拒绝进入穿透，从根上杜绝锁死。
+        退出穿透永远允许（热键线程独立于窗口，Ctrl+Alt+L 不受穿透影响）。"""
+        if not self.cfg["click_through"]:
+            # 进入穿透前确认热键已注册（线程启动后数毫秒即完成，这里给 0.5s 兜底）
+            if not self._hk.registered:
+                deadline = time.time() + 0.5
+                while not self._hk.registered and time.time() < deadline:
+                    time.sleep(0.02)
+                if not self._hk.registered:
+                    self._set_status("全局热键注册失败，穿透已禁用（Ctrl+Alt+L 被占用？）")
+                    return
+            self.cfg["click_through"] = True
+            self._apply_click_through()
+            self._set_status("穿透已开 · 按 %s 恢复鼠标" % (self._hk.label or "全局热键"))
+        else:
+            self.cfg["click_through"] = False
+            self._apply_click_through()
+            self._set_status("穿透已关 · 鼠标恢复")
         save_conf(self.cfg)
-        if on:
-            # 穿透后收不到键鼠：绑定恢复热键的唯一办法=再点一次 S 区域无效，
-            # 故穿透模式仅在设置条里开，且提示恢复方式（托盘后续再加）
-            self._bar_status("鼠标穿透已开：再按设置条按钮恢复（穿透时窗口收不到键鼠）")
 
     def _apply_click_through(self):
         if sys.platform != "win32":
@@ -230,8 +347,8 @@ class DesktopLyric:
         btn("透明+", lambda: self._bump_op(0.05))
         btn("透明-", lambda: self._bump_op(-0.05))
         btn("下一行", lambda: self._toggle_next())
-        btn("穿透", lambda: self.set_click_through(True))
-        btn("恢复鼠标", lambda: self.set_click_through(False))
+        btn("穿透", lambda: (not self.cfg["click_through"]) and self.toggle_click_through())
+        btn("恢复鼠标", lambda: self.cfg["click_through"] and self.toggle_click_through())
         self._bar_status = tk.Label(self.bar, text="", bg="#22262E", fg="#94A3B8",
                                     font=("Microsoft YaHei UI", 9))
         self._bar_status.pack(side="left", padx=8)
