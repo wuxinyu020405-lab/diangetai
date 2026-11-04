@@ -9,6 +9,7 @@ import asyncio
 import random
 import aiohttp
 from aiohttp import web
+import customtkinter as ctk
 import time
 import winsdk.windows.media.control as wmc
 import blivedm
@@ -52,11 +53,19 @@ class MusicApp:
 
         self.root.title(f"控制台 - 房间 {self.config.get('room_id', '未配置')} - {version.DISPLAY}"); self.root.geometry("780x880")
         self._set_window_icon()
+        self._tray = None        # 惰性托盘对象；False=本机托盘不可用
+        self._exiting = False
         self.setup_ui()
+        # v1.2.2·需求21：点 X = 缩到托盘（拍板方案 a）；真退出只走托盘菜单
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
+        except Exception:
+            pass
         self.download_tasks = {}
         self.last_download_reason = None   # 需求9：单行结论的失败归因标记
         self.thread = threading.Thread(target=self.start_async_loop, daemon=True); self.thread.start()
         updater.start_background_check(self)   # 启动 20s 后静默检查一次更新
+        self.root.after(3000, self._qm_tick)   # v1.2.2·队列管理页自动刷新
 
     def init_audio_engine(self):
         try:
@@ -80,6 +89,137 @@ class MusicApp:
         except Exception as e:
             print(f"[WARN] 窗口图标设置失败: {e}")
 
+    # ═════════ 队列管理页（v1.2.2）═══════════════════════════════════
+    # 线程约定：state.playlist / pending_requests 由 asyncio 线程读写，
+    # 所有修改必须经 self.loop.call_soon_threadsafe 投递到 loop 线程执行；
+    # 渲染只在 Tk 线程做（读快照跨线程仅做浅拷贝，展示数据无害竞态）。
+
+    def _qm_post(self, fn):
+        """把改动投递到 asyncio loop 线程；loop 还没起来时直接拒绝并提示。"""
+        loop = getattr(self, "loop", None)
+        if loop is None:
+            self.log("ℹ️ 播放引擎还没就绪，队列操作稍后再试")
+            return False
+        try:
+            loop.call_soon_threadsafe(fn)
+            return True
+        except Exception as e:
+            self.log(f"❌ 队列操作投递失败: {e}")
+            return False
+
+    def qm_remove_pending(self, idx):
+        req = dict(state.pending_requests[idx]) if 0 <= idx < len(state.pending_requests) else None
+        if req is None:
+            return
+        def _do():
+            if 0 <= idx < len(state.pending_requests):
+                r = state.pending_requests.pop(idx)
+                self.log(f"🗑️ 已从排队中移除: 《{r.get('song_name','')}》-{r.get('uname','')}")
+        self.root.after(0, lambda: (self._qm_post(_do), self.refresh_queue_mgmt()))
+
+    def qm_remove_ready(self, idx):
+        def _do():
+            if 0 <= idx < len(state.playlist):
+                r = state.playlist.pop(idx)
+                self.log(f"🗑️ 已移出待播队列: 《{r.get('display_name','')}》-{r.get('requester','')}（本地音频保留）")
+        def _ui():
+            if self._qm_post(_do):
+                self.refresh_queue_mgmt()
+        self.root.after(0, _ui)
+
+    def qm_move_top(self, idx):
+        def _do():
+            if 0 < idx < len(state.playlist):
+                r = state.playlist.pop(idx)
+                state.playlist.insert(0, r)
+                self.log(f"⬆️ 已置顶: 《{r.get('display_name','')}》（下一首就播它）")
+        def _ui():
+            if self._qm_post(_do):
+                self.refresh_queue_mgmt()
+        self.root.after(0, _ui)
+
+    @staticmethod
+    def _fmt_wait(ts):
+        s = max(0, int(time.time() - (ts or time.time())))
+        return f"{s//60}分{s%60:02d}秒" if s >= 60 else f"{s}秒"
+
+    def refresh_queue_mgmt(self):
+        """重绘队列管理页两段列表。只读快照 + Tk 线程渲染。"""
+        if not hasattr(self, "qm_pending_box"):
+            return
+        try:
+            proc = state.processing_request
+            pend = [dict(r) for r in state.pending_requests]
+            ready = [dict(r) for r in state.playlist]
+            cur = state.current_song
+        except Exception:
+            return
+        try:
+            self.lbl_qm_summary.configure(
+                text=f"正在播放: {cur['display_name'] if cur else '—'}    "
+                     f"处理中 {len(pend) + (1 if proc else 0)} 首 · 待播 {len(ready)} 首")
+        except Exception:
+            pass
+        for box in (self.qm_pending_box, self.qm_ready_box):
+            for w in box.winfo_children():
+                w.destroy()
+        _f = ui_ctk._font
+        _MUT = ui_ctk.MUTED
+        if proc:
+            row = ctk_frame = ctk.CTkFrame(self.qm_pending_box, fg_color=("white", "#1E293B"), corner_radius=8)
+            row.pack(fill="x", pady=2, padx=2)
+            ctk.CTkLabel(row, text="⬇ 正在下载", width=86, anchor="w", font=_f(11, True),
+                         text_color="#F59E0B").pack(side="left", padx=8)
+            ctk.CTkLabel(row, text=f"《{proc.get('song_name','')}》 - {proc.get('uname','')}",
+                         anchor="w", font=_f(11)).pack(side="left", fill="x", expand=True)
+            ctk.CTkLabel(row, text=self._fmt_wait(proc.get("ts")), font=_f(10),
+                         text_color=_MUT).pack(side="right", padx=(0, 8))
+        for i, r in enumerate(pend):
+            row = ctk.CTkFrame(self.qm_pending_box, fg_color=("white", "#1E293B"), corner_radius=8)
+            row.pack(fill="x", pady=2, padx=2)
+            ctk.CTkLabel(row, text=f"#{i+1} 排队中", width=86, anchor="w", font=_f(11),
+                         text_color=_MUT).pack(side="left", padx=8)
+            ctk.CTkLabel(row, text=f"《{r.get('song_name','')}》 - {r.get('uname','')}",
+                         anchor="w", font=_f(11)).pack(side="left", fill="x", expand=True)
+            ctk.CTkButton(row, text="删除", width=52, height=22, corner_radius=6, font=_f(10),
+                          fg_color=("#EF4444", "#B91C1C"), hover_color="#DC2626", text_color="white",
+                          command=lambda k=i: self.qm_remove_pending(k)).pack(side="right", padx=(0, 4))
+            ctk.CTkLabel(row, text=self._fmt_wait(r.get("ts")), font=_f(10),
+                         text_color=_MUT).pack(side="right")
+        if proc is None and not pend:
+            ctk.CTkLabel(self.qm_pending_box, text="（空）", font=_f(11), text_color=_MUT).pack(anchor="w", padx=8)
+        for i, r in enumerate(ready):
+            row = ctk.CTkFrame(self.qm_ready_box, fg_color=("white", "#1E293B"), corner_radius=8)
+            row.pack(fill="x", pady=2, padx=2)
+            lead = "▶ 下一首" if i == 0 else f"#{i+1}"
+            ctk.CTkLabel(row, text=lead, width=70, anchor="w", font=_f(11, i == 0),
+                         text_color=("#22C55E" if i == 0 else None)).pack(side="left", padx=8)
+            ctk.CTkLabel(row, text=f"《{r.get('display_name','')}》 - {r.get('requester','')}",
+                         anchor="w", font=_f(11)).pack(side="left", fill="x", expand=True)
+            if i > 0:
+                ctk.CTkButton(row, text="置顶", width=52, height=22, corner_radius=6, font=_f(10),
+                              fg_color=("#2563EB", "#3B82F6"), hover_color="#1D4ED8", text_color="white",
+                              command=lambda k=i: self.qm_move_top(k)).pack(side="right", padx=(0, 4))
+            ctk.CTkButton(row, text="删除", width=52, height=22, corner_radius=6, font=_f(10),
+                          fg_color=("#EF4444", "#B91C1C"), hover_color="#DC2626", text_color="white",
+                          command=lambda k=i: self.qm_remove_ready(k)).pack(side="right", padx=(0, 4))
+        if not ready:
+            ctk.CTkLabel(self.qm_ready_box, text="（空）", font=_f(11), text_color=_MUT).pack(anchor="w", padx=8)
+
+    def _qm_tick(self):
+        """2.5s 自动刷新（页面没建则跳过；异常绝不打断 tick 链）。"""
+        try:
+            if hasattr(self, "qm_pending_box") and self.qm_pending_box.winfo_exists():
+                # 只在窗口可见时重绘，缩到托盘时省资源
+                if self.root.state() != "withdrawn":
+                    self.refresh_queue_mgmt()
+        except Exception:
+            pass
+        try:
+            self.root.after(2500, self._qm_tick)
+        except Exception:
+            pass
+
     def request_pause(self, on):
         """v1.1·N1：显式设置暂停意图（弹幕【暂停】/【继续】与 GUI 共用）。
         语义（用户拍板）：只暂停当前这首歌的播放；下载与收队列照常。
@@ -100,6 +240,82 @@ class MusicApp:
     def toggle_pause(self):
         """GUI 按钮入口：按当前实际状态取反。"""
         self.request_pause(not state.pause_event.is_set() if state.pause_event else True)
+
+    def request_skip(self):
+        """切歌：复用弹幕同一入口逻辑（Tk 线程 set asyncio.Event）。"""
+        if state.skip_event and not state.skip_event.is_set():
+            self.log("⏭️ 切歌！")
+            state.skip_event.set()
+
+    # ═════════ 系统托盘（v1.2.2 需求21）═════════════════════════════
+    def minimize_to_tray(self):
+        """点 X / 托盘"隐藏"时调用：缩进托盘，程序继续跑。
+        托盘起不来（缺库/老系统）→ 退回普通最小化，绝不崩、绝不拦关闭。"""
+        if self._tray is None:
+            try:
+                import tray
+                self._tray = tray.Tray(self)
+            except Exception as e:
+                self.log(f"⚠️ 托盘模块不可用: {e}（本次改为最小化）")
+                self._tray = False
+        if self._tray is False:
+            self.root.iconify()
+            return
+        if not self._tray.start():
+            self._tray = False
+            self.root.iconify()
+            return
+        self.root.withdraw()                       # 藏起窗口但进程活着
+        self._tray.notify("点歌台在后台运行",
+                          "仍在收点歌与播放。双击托盘图标恢复窗口；右键选「退出」才真正关闭。")
+
+    def show_from_tray(self):
+        """托盘"显示主界面" / 双击图标：从托盘唤回窗口。"""
+        try:
+            self.root.deiconify()
+            self.root.state("normal")
+            self.root.lift()
+            self.root.focus_force()
+        except Exception:
+            pass
+
+    def quit_app(self):
+        """托盘"退出" / 唯一的真退出路径：落盘配置 → 停托盘 → 清子进程 → os._exit。
+        这条正是 #18（残留进程致二次打不开）的修法：保证一次退干净。"""
+        try:
+            self._exiting = True
+        except Exception:
+            pass
+        # 1) 先落盘设置/凭据（os._exit 不走 atexit，必须显式存）
+        try:
+            self.save_style_config()
+        except Exception:
+            pass
+        # 2) 停托盘图标（否则图标残影留在通知区）
+        try:
+            if self._tray:
+                self._tray.stop()
+        except Exception:
+            pass
+        # 3) 杀抖音签名可能遗留的 node 子进程（孤儿）
+        try:
+            import subprocess
+            subprocess.run(["taskkill", "/F", "/IM", "node.exe", "/T"],
+                           capture_output=True,
+                           creationflags=0x08000000, timeout=8)
+        except Exception:
+            pass
+        # 4) 停播放器，让音频设备释放（尽力，超时也强退）
+        try:
+            self.player_stop()
+        except Exception:
+            pass
+        # 5) 单实例互斥体随进程自动释放；os._exit 立即终结全部线程
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        os._exit(0)
 
     def update_pause_button(self):
         """按钮文案跟随实际状态（在播放器线程里调用，after 回主线程）。"""

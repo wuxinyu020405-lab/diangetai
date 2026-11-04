@@ -85,3 +85,7 @@ _update_staging/
 
 # 回归测试临时目录
 _test_tmp_*/
+
+# pip 在 TMPDIR=工作区 时残留的解包/元数据临时目录（误 git add -A 会带进 7MB whl）
+pip-metadata-*/
+pip-unpack-*/

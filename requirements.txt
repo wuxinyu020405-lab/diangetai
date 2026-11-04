@@ -44,6 +44,8 @@ qqmusic-api-python==0.8.2
 ply==3.11
 jsonpath-ng==1.14.0
 pure-protobuf==3.1.5       # blivedm 的运行时依赖（models/pb.py 直接 import）
+pystray==0.19.5            # v1.2.2 系统托盘（tray.py）；Windows 后端纯 ctypes，零传递依赖
+Pillow==13.0.0             # 托盘图标（pystray 需要 PIL.Image；spec 收其二进制）
 # ⚠️ blivedm 用 --no-deps 安装，它的运行时依赖必须在本文件手动列全：
 #    aiohttp / paho-mqtt / pure-protobuf / Brotli —— 漏一个 CI 上 exe 启动即崩
 #    （Run#9：漏 pure-protobuf，本机因 venv 里有而测不出）

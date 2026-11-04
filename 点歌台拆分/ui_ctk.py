@@ -146,12 +146,13 @@ def build(app, root):
     # ── 标签页（标准 CTkTabview，不做自定义切换优化）──
     name_log = "运行日志"
     name_acct = "账号登录"
+    name_queue_page = "队列管理"
     name_basic = "音质缓存"
     name_mix = "综合挂件"
     name_lyric = "纯歌词"
     name_play = "正在播放"
     name_queue = "点歌列表"
-    PAGE_NAMES = [name_log, name_acct, name_basic, name_mix, name_lyric, name_play, name_queue]
+    PAGE_NAMES = [name_log, name_acct, name_queue_page, name_basic, name_mix, name_lyric, name_play, name_queue]
 
     tabs = ctk.CTkTabview(
         root,
@@ -252,6 +253,31 @@ def build(app, root):
     ctk.CTkButton(b, text="🔄 刷新账号状态", width=140, height=30, corner_radius=8,
                   fg_color=("#64748B", "#475569"), font=_font(12),
                   command=app.update_account_status).pack(anchor="w")
+
+    # ══════════════════ 队列管理（v1.2.2：查看/删除 排队·就绪点歌）══════════════════
+    qm_page = pages[name_queue_page]
+    qm_sc = scroller(qm_page)
+
+    bar = ctk.CTkFrame(qm_sc, fg_color="transparent")
+    bar.pack(fill="x", pady=(0, 6))
+    app.lbl_qm_summary = ctk.CTkLabel(bar, text="", font=_font(12, True), anchor="w")
+    app.lbl_qm_summary.pack(side="left")
+    ctk.CTkButton(bar, text="🔄 刷新", width=70, height=26, corner_radius=8, font=_font(11),
+                  command=lambda: app.refresh_queue_mgmt()).pack(side="right", padx=(6, 0))
+    ctk.CTkButton(bar, text="⏭️ 切歌", width=70, height=26, corner_radius=8, font=_font(11),
+                  fg_color=("#F59E0B", "#B45309"), hover_color=("#D97706", "#92400E"),
+                  text_color="white",
+                  command=app.request_skip).pack(side="right")
+
+    b1 = _section(qm_sc, "🔄 处理中", "观众已点、正在排队下载（串行，队首是当前在下载的一首）")
+    app.qm_pending_box = ctk.CTkFrame(b1, fg_color="transparent")
+    app.qm_pending_box.pack(fill="x")
+
+    b2 = _section(qm_sc, "✅ 已就绪待播", "下载成功、排队等播（队首=下一首）。删除=只出列，本地音频保留")
+    app.qm_ready_box = ctk.CTkFrame(b2, fg_color="transparent")
+    app.qm_ready_box.pack(fill="x")
+
+    app._qm_built = False   # 首帧由 mainapp.refresh_queue_mgmt 绘制，此后 2s 自动刷
 
     # ══════════════════ 音质缓存 ══════════════════
     basic_page = pages[name_basic]

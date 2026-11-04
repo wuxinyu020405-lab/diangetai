@@ -8,6 +8,8 @@ playlist = []        # 就绪队列：只含"缓存命中或下载成功"的歌�
 
 pending_requests = []  # 需求3：点歌待处理队列（串行：本首出结论才处理下一首）
 
+processing_request = None  # v1.2.2·队列管理页：song_request_worker 正在处理的那条（出列≠消失）
+
 # 第5步：配额保护记账（下载侧；缓存播放不受其约束）
 # 持久化在 quota_state.json（跨重启有效：服务端配额并不会因重启而重置）
 quota_state = {"date": "", "downloaded": 0, "fail_streak": 0, "cooldown_until": 0.0}

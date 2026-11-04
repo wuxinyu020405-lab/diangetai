@@ -116,7 +116,12 @@ def _acquire_single_instance():
 
 
 def _bring_existing_window_front():
-    """尽力把已运行实例的主窗口置前；找不到就算了，不报错。"""
+    """尽力把已运行实例的主窗口置前；找不到就算了，不报错。返回是否找到。
+
+    v1.2.2·托盘（#18 沟通歧义分支）：实例缩进托盘时窗口是 withdraw 隐藏态，
+    旧代码 IsWindowVisible 过滤会直接跳过它 → 二次启动只弹"已在运行"而窗口
+    出不来，用户误判"打不开"。现在不过滤可见性，按标题找到后强制
+    SW_SHOW(解除withdraw) + SW_RESTORE(取消最小化)。"""
     try:
         import ctypes
         user32 = ctypes.windll.user32
@@ -126,8 +131,6 @@ def _bring_existing_window_front():
         @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
         def _cb(hwnd, _l):
             nonlocal target
-            if not user32.IsWindowVisible(hwnd):
-                return True
             buf = ctypes.create_unicode_buffer(256)
             user32.GetWindowTextW(hwnd, buf, 256)
             if buf.value.startswith("点歌台控制台"):
@@ -137,10 +140,13 @@ def _bring_existing_window_front():
 
         user32.EnumWindows(_cb, 0)
         if target:
+            user32.ShowWindow(target, SW_SHOW)
             user32.ShowWindow(target, SW_RESTORE)
             user32.SetForegroundWindow(target)
+            return True
     except Exception:
         pass
+    return False
 
 
 def _show_already_running():
@@ -150,7 +156,8 @@ def _show_already_running():
     from tkinter import messagebox as _mb
     _r = _tk.Tk()
     _r.withdraw()
-    _mb.showinfo("点歌台", "点歌台已经在运行了。\n\n已为你切到它的窗口；\n如果看不到，请检查任务栏/系统托盘。")
+    _mb.showinfo("点歌台", "点歌台已经在运行了。\n\n已尝试为你切到它的窗口；\n"
+                           "如果它最小化到了系统托盘，请在任务栏右下角托盘区双击图标。")
     _r.destroy()
 
 
@@ -187,7 +194,9 @@ def run_selftest():
               "customtkinter", "pygame", "aiohttp", "blivedm",
               "qqmusic_api", "winsdk.windows.media.control",
               # v1.2.1：加密与自动更新（漏打包 = 装完直接崩，必须自检拦住）
-              "secretstore", "autoupdater"):
+              "secretstore", "autoupdater",
+              # v1.2.2：系统托盘（漏装 = 点X直接崩，同样自检拦住）
+              "tray", "pystray", "pystray._win32", "PIL", "PIL.Image", "PIL._tkinter_finder"):
         try:
             importlib.import_module(m)
             out("  OK   " + m)
@@ -320,11 +329,13 @@ if __name__ == '__main__':
         config_data = {"room_id": "", "bili_cookie": "", "qqmusic_path": ""}
 
     if not _acquire_single_instance():
-        _bring_existing_window_front()
-        try:
-            _show_already_running()
-        except Exception:
-            pass   # 无桌面会话等极端情况：静默退出即可
+        # v1.2.2·托盘：能唤回已有（含缩在托盘的）窗口就静默退，别再弹"已在运行"框；
+        # 唤不回（老系统/极端情况）才提示用户去托盘找。
+        if not _bring_existing_window_front():
+            try:
+                _show_already_running()
+            except Exception:
+                pass   # 无桌面会话等极端情况：静默退出即可
         sys.exit(0)
 
     # v1.2.1·需求19续跑分支：上次用户选了"稍后更新"，marker 还在 →

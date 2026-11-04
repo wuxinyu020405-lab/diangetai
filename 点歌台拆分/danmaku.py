@@ -37,7 +37,10 @@ def handle_message(app, text, uname, platform="bilibili"):
         if song_name:
             app.log("%s收到点歌请求: %s - %s" % (tag, song_name, uname))
             # 需求3：不再并发起 task，只入待处理队列，由 song_request_worker 串行消费
-            state.pending_requests.append({"song_name": song_name, "uname": uname, "platform": platform})
+            # v1.2.2·队列管理页：带 ts=入队时刻（等待时长展示用）
+            import time as _t
+            state.pending_requests.append({"song_name": song_name, "uname": uname,
+                                           "platform": platform, "ts": _t.time()})
 
 
 class BiliHandler(blivedm.BaseHandler):
@@ -153,7 +156,11 @@ async def song_request_worker(app_instance):
                 continue
             # 简单快照取队首（asyncio 单线程，无并发写风险）
             req = state.pending_requests.pop(0)
-            await process_one_request(req, app_instance)
+            state.processing_request = req   # v1.2.2·队列管理页：正在下载的那条保持可见
+            try:
+                await process_one_request(req, app_instance)
+            finally:
+                state.processing_request = None
         except Exception as e:
             app_instance.log(f"[WARN] 点歌处理循环异常: {type(e).__name__}: {e}")
             await asyncio.sleep(1)
