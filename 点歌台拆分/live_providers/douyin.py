@@ -119,8 +119,18 @@ class DouyinProvider:
     def __init__(self, web_rid, log=None, sign_dir=None):
         self.web_rid = str(web_rid or "").strip()
         self.log = log or (lambda m: None)
-        base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.sign_dir = sign_dir or os.path.join(base, "douyin_sign")
+        if sign_dir is None:
+            # 候选顺序：exe 同级（打包版，spec 把壳放这里）→ _MEIPASS → 源码工作区根
+            cands = []
+            if getattr(sys, "frozen", False):
+                cands.append(os.path.join(os.path.dirname(sys.executable), "douyin_sign"))
+            mp = getattr(sys, "_MEIPASS", "")
+            if mp:
+                cands.append(os.path.join(mp, "douyin_sign"))
+            cands.append(os.path.join(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))), "douyin_sign"))
+            sign_dir = next((c for c in cands if c and os.path.isdir(c)), cands[-1])
+        self.sign_dir = sign_dir
         self.queue = None
         self._stopped = False
 

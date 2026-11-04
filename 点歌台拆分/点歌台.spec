@@ -62,6 +62,20 @@ else:
     APP_ICON = None
     print("[spec][WARN] 未找到 app.ico，exe 将无自定义图标")
 
+# 抖音签名调用壳（sign_runner.js + package.json）随包分发到 exe 旁 douyin_sign/。
+# 注意：sign.js（webmssdk 反混淆产物，版权归字节）不在仓库、不打包——
+# 想启用抖音的用户按使用说明自备 sign.js 并安装 node；缺任一，抖音通道
+# 自动"未启用"降级（live_providers.douyin.check_deps），B站主路不受影响。
+_dy_sign = os.path.join(os.path.dirname(SPECPATH), "douyin_sign")
+if os.path.isdir(_dy_sign):
+    for _f in ("sign_runner.js", "package.json"):
+        _fp = os.path.join(_dy_sign, _f)
+        if os.path.exists(_fp):
+            datas.append((_fp, "douyin_sign"))
+    print("[spec] 抖音签名壳已打包: douyin_sign/ (sign.js 需用户自备)")
+else:
+    print("[spec][WARN] 未找到 douyin_sign/，抖音功能将始终未启用")
+
 # ── 需要完整收集的包 ──────────────────────────────────────────────
 # qqmusic_api: 大量动态导入（algorithms/models/modules）+ 可能带数据文件
 # customtkinter: 必须带 assets（字体/主题 JSON），否则界面起不来
@@ -174,6 +188,9 @@ hiddenimports += [
     "state", "settings", "lyrics", "musiclib", "overlay",
     "smtc", "browserlogin", "danmaku", "mainapp", "ui_ctk",
     "version", "updater",
+    # 抖音 provider 是函数内 import（main_async 里），静态分析抓不到，必须显式列，
+    # 否则打包版启用抖音直接 ModuleNotFoundError
+    "live_providers", "live_providers.douyin",
 ]
 
 # ── 运行期需要的非代码文件 ────────────────────────────────────────
@@ -227,6 +244,19 @@ coll = COLLECT(
     upx=False,
     name="点歌台",
 )
+
+# ── 抖音签名壳复制到 exe 同级 douyin_sign/（用户往这里放 sign.js 最直观）──
+# datas 已把它带进 _internal，但用户看不到 _internal；再复制一份到 exe 旁，
+# provider 的 sign_dir 候选第一优先级就是 exe 同级。sign.js 不打包（字节版权）。
+_dy_src = os.path.join(os.path.dirname(SPECPATH), "douyin_sign")
+_dy_dst = os.path.join(DISTPATH, "点歌台", "douyin_sign")
+if os.path.isdir(_dy_src):
+    os.makedirs(_dy_dst, exist_ok=True)
+    for _f in ("sign_runner.js", "package.json"):
+        _fp = os.path.join(_dy_src, _f)
+        if os.path.exists(_fp):
+            shutil.copy2(_fp, os.path.join(_dy_dst, _f))
+    print("[spec] 抖音签名壳已复制到 exe 同级 douyin_sign/")
 
 # ── 把 .NET 6 运行时打进发布目录（实现"目标机器无需预装 .NET"）────────
 # 登录用 pywebview + WebView2，走 coreclr 需要 .NET 运行时；
