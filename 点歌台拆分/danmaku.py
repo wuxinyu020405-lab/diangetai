@@ -1,7 +1,10 @@
 """
-弹幕：B站直播 handler、点歌指令解析与串行点歌处理
+弹幕：直播平台 handler、点歌指令解析与串行点歌处理
 需求1+3（改造后）：弹幕只入待处理队列；单 worker 串行处理，
 本首结论明确（就绪/失败/跳过）才处理下一首；下载成功或缓存命中才进 playlist。
+
+v1.2·抖音接入：指令解析抽成平台无关的 handle_message（B站 blivedm 与
+抖音 provider 共用同一入口，行为完全一致）。
 """
 
 import asyncio
@@ -11,27 +14,38 @@ import musiclib
 import state
 
 
+def handle_message(app, text, uname, platform="bilibili"):
+    """平台无关的指令入口：切歌/暂停/继续/点歌。
+    两平台行为对齐的关键——任何 provider 收到 chat 都调这里。"""
+    text = (text or "").strip()
+    if not text:
+        return
+    tag = "" if platform == "bilibili" else "[%s] " % platform
+    if text == "切歌":
+        if state.skip_event and not state.skip_event.is_set():
+            app.log("%s⏭️ 收到【切歌】指令！" % tag)
+            app.root.after(0, lambda: state.skip_event.set())
+        return
+    # v1.1·N1：暂停/继续（精确匹配，防"暂停一下好吗"这类聊天误触；
+    # 与切歌同款 root.after 编组到 Tk 线程，复用 GUI 按钮同一入口保证行为一致）
+    if text == "暂停":
+        app.root.after(0, lambda: app.request_pause(True)); return
+    if text == "继续":
+        app.root.after(0, lambda: app.request_pause(False)); return
+    if text.startswith("点歌"):
+        song_name = text.replace("点歌", "", 1).strip()
+        if song_name:
+            app.log("%s收到点歌请求: %s - %s" % (tag, song_name, uname))
+            # 需求3：不再并发起 task，只入待处理队列，由 song_request_worker 串行消费
+            state.pending_requests.append({"song_name": song_name, "uname": uname})
+
+
 class BiliHandler(blivedm.BaseHandler):
     def __init__(self, app_instance):
         super().__init__(); self.app = app_instance
     def _on_danmaku(self, client, message):
-        text = message.msg.strip()
-        uname = getattr(message, 'uname', '') or '神秘观众'
-        if text == "切歌":
-            if state.skip_event and not state.skip_event.is_set(): self.app.log("⏭️ 收到【切歌】指令！"); self.app.root.after(0, lambda: state.skip_event.set())
-            return
-        # v1.1·N1：暂停/继续（精确匹配，防"暂停一下好吗"这类聊天误触；
-        # 与切歌同款 root.after 编组到 Tk 线程，复用 GUI 按钮同一入口保证行为一致）
-        if text == "暂停":
-            self.app.root.after(0, lambda: self.app.request_pause(True)); return
-        if text == "继续":
-            self.app.root.after(0, lambda: self.app.request_pause(False)); return
-        if text.startswith("点歌"):
-            song_name = text.replace("点歌", "").strip()
-            if song_name: 
-                self.app.log(f"收到点歌请求: {song_name} - {uname}")
-                # 需求3：不再并发起 task，只入待处理队列，由 song_request_worker 串行消费
-                state.pending_requests.append({"song_name": song_name, "uname": uname})
+        handle_message(self.app, message.msg,
+                       getattr(message, 'uname', '') or '神秘观众', "bilibili")
 
 
 async def search_song(song_name, app_instance, retry=2):

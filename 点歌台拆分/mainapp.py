@@ -401,12 +401,46 @@ class MusicApp:
             if self.config.get('room_id'):
                 client = blivedm.BLiveClient(int(self.config['room_id']), session=http_session)
                 client.set_handler(danmaku.BiliHandler(self)); client.start(); self.log("✅ 连接 B 站成功！等待弹幕中...")
-                try:
-                    while True: await asyncio.sleep(3600)
-                finally: await client.stop_and_close()
             else:
-                self.log("❌ 缺少房间号，请点击顶部登录 B站！")
+                self.log("❌ 缺少 B站 房间号，请点击顶部登录 B站！")
+            # v1.2·抖音双平台：配置了 douyin_room_id 就并起一路匿名弹幕
+            dy_room = str(self.config.get('douyin_room_id', '') or '').strip()
+            if dy_room:
+                import queue as _q
+                from live_providers.douyin import DouyinProvider
+                self._dy_q = _q.Queue()
+                self._dy = DouyinProvider(dy_room, log=self.log)
+                asyncio.create_task(self._dy.run(self._dy_q))
+                asyncio.create_task(self._douyin_dispatcher())
+                self.log("🎙️ 抖音通道启动中（房间 %s，匿名）" % dy_room)
+            try:
                 while True: await asyncio.sleep(3600)
+            finally:
+                if self.config.get('room_id'):
+                    await client.stop_and_close()
+
+    async def _douyin_dispatcher(self):
+        """抖音消息队列 → 统一指令入口 handle_message（与 B 站同一行为）。
+        chat 进指令解析；member/social/gift 只记日志（v1 不做进场播报）。"""
+        import queue as _q
+        while True:
+            try:
+                msg = await asyncio.to_thread(self._dy_q.get, True, 1)
+            except _q.Empty:
+                await asyncio.sleep(0.2)
+                continue
+            except Exception:
+                await asyncio.sleep(1)
+                continue
+            try:
+                if msg.type == "chat":
+                    danmaku.handle_message(self, msg.text, msg.uname, "douyin")
+                elif msg.type == "gift":
+                    self.log("🎁 [douyin] %s 送 %s" % (msg.uname, msg.extra))
+                elif msg.type == "member":
+                    self.log("🚪 [douyin] %s 进入直播间" % msg.uname)
+            except Exception as e:
+                print(f"[WARN] 抖音消息分发异常: {e}")
 
     async def fetch_lyrics_by_mid_or_keyword(self, song_mid=None, keyword=None):
         try:

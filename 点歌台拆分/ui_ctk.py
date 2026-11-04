@@ -207,6 +207,16 @@ def build(app, root):
                   fg_color=ACCENT, hover_color=("#1D4ED8", "#60A5FA"),
                   command=lambda: browserlogin.bilibili_auto_login(app)).pack(anchor="w")
 
+    # v1.2·抖音双平台监控：匿名免登录，只填房间号（live.douyin.com/ 后那串数字）
+    b = _section(acct_sc, "抖音直播间", "匿名监控 · 免登录，重启生效")
+    h = _row(b, "房间号")
+    app.entry_dy_room = ctk.CTkEntry(h, width=200, font=_font(12),
+                                     placeholder_text="如 256438100956，留空=不启用")
+    app.entry_dy_room.insert(0, str(app.config.get("douyin_room_id", "") or ""))
+    app.entry_dy_room.pack(side="left")
+    live_entry(app.entry_dy_room, lambda v: (app.config.__setitem__("douyin_room_id", v.strip()),
+                                             app.schedule_save_style()))
+
     b = _section(acct_sc, "QQ音乐账号", "VIP 音质所需")
     app.lbl_qq_status = ctk.CTkLabel(b, text="⏳ 检测中...", font=_font(12), anchor="w")
     app.lbl_qq_status.pack(anchor="w", pady=(0, 8))
