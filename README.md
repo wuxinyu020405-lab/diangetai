@@ -7,7 +7,7 @@ OBS 画面实时显示点歌队列与滚动歌词；点歌间隙自动让位/恢
 
 ![平台](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-blue)
 ![版本](https://img.shields.io/badge/version-v1.0.0-green)
-![许可](https://img.shields.io/badge/license-MIT-lightgrey)
+![许可](https://img.shields.io/badge/license-GPLv3-blue)
 
 ## 功能一览
 
@@ -84,7 +84,11 @@ ISCC.exe /DMyAppVersion=1.0.0 点歌台.iss        # Inno Setup 安装包
 - 通过本工具获取的歌曲音频**仅限直播间内个人使用**，请勿二次分发、录制传播，
   尊重音乐版权；由此引发的版权纠纷与本仓库无关。
 - 弹幕自动化行为可能违反 B 站用户协议，风险自负；请勿用于任何违规场景。
-- 代码按 MIT 许可提供，无任何担保。
+- 本项目依赖 GPLv3 授权的 `qqmusic-api-python`，故**整体以 GPL-3.0-or-later 发布**：
+  你可自由使用、修改、再分发（含收费分发），但再分发时必须一并公开源码。详见 [LICENSE](LICENSE)。
+- 本工具**仅供个人学习 / 直播自用**：请勿商业售卖、批量分发音频、用于水军等违规场景——
+  规模化与商业化会显著提高平台追责风险；账号风控后果由使用者承担。
+- 软件按“现状”提供，无任何担保。
 
 ## 常见问题速查
 
@@ -99,4 +103,4 @@ ISCC.exe /DMyAppVersion=1.0.0 点歌台.iss        # Inno Setup 安装包
 
 ## License
 
-[MIT](LICENSE)
+本项目以 [GPL-3.0-or-later](LICENSE) 发布（因依赖 GPLv3 的 QQ 音乐库，整体受 copyleft 传染）。

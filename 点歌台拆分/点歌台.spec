@@ -43,7 +43,7 @@ VSVersionInfo(
       StringStruct('FileDescription', '扫码点歌台（B站弹幕点歌 + OBS 挂件）'),
       StringStruct('FileVersion', '{v}'),
       StringStruct('InternalName', 'DianGeTai'),
-      StringStruct('LegalCopyright', 'MIT License'),
+      StringStruct('LegalCopyright', 'GPL-3.0-or-later'),
       StringStruct('OriginalFilename', '点歌台.exe'),
       StringStruct('ProductName', '扫码点歌台'),
       StringStruct('ProductVersion', '{v}'),
