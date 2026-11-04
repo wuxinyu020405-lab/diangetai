@@ -216,6 +216,19 @@ def build(app, root):
     app.entry_dy_room.pack(side="left")
     live_entry(app.entry_dy_room, lambda v: (app.config.__setitem__("douyin_room_id", v.strip()),
                                              app.schedule_save_style()))
+    app.lbl_dy_status = ctk.CTkLabel(b, text="⚪ 抖音：未启用", font=_font(11), anchor="w")
+    app.lbl_dy_status.pack(anchor="w", pady=(6, 0))
+    def _poll_dy():
+        try:
+            st = state.douyin_status
+            txt = ("🟢 抖音：" + st) if st.startswith("已连接") else \
+                  (("🟡 抖音：" + st) if st else "⚪ 抖音：未启用")
+            ui_ctk_set = globals()["set_label"]
+            ui_ctk_set(app.lbl_dy_status, text=txt)
+        except Exception:
+            pass
+        root.after(3000, _poll_dy)
+    root.after(2000, _poll_dy)
 
     b = _section(acct_sc, "QQ音乐账号", "VIP 音质所需")
     app.lbl_qq_status = ctk.CTkLabel(b, text="⏳ 检测中...", font=_font(12), anchor="w")

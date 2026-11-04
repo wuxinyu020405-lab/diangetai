@@ -71,6 +71,8 @@ style_config = {
 
 overlay_port = 8080   # OBS 挂件实际监听端口（8080 被占时自动顺延，GUI 复制地址读这里）
 
+douyin_status = ""    # v1.2·抖音通道状态（provider 写、GUI 轮询读）：连接中/已连接/停用原因
+
 current_play_mode = "local"
 
 is_local_playing = True    

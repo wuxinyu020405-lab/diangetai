@@ -28,6 +28,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import state
+
 from . import DanmuMsg
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -215,8 +217,25 @@ class DouyinProvider:
         return ss, rest
 
     # ---------- ⑤ 收帧循环 ----------
+    def check_deps(self):
+        """抖音功能依赖自检：node + sign_runner.js + sign.js。
+        返回 (ok, 缺失说明)。缺则调用方应友好停用抖音路，不进入重连循环。"""
+        if shutil_which_node() is None:
+            return False, "未找到 Node.js（抖音签名需要，见使用说明抖音章节）"
+        if not os.path.exists(os.path.join(self.sign_dir, "sign_runner.js")):
+            return False, "缺少 douyin_sign/sign_runner.js"
+        if not os.path.exists(os.path.join(self.sign_dir, "sign.js")):
+            return False, "缺少 douyin_sign/sign.js（抖音签名组件，需自行获取，见使用说明）"
+        return True, ""
+
     async def run(self, queue):
         self.queue = queue
+        # 依赖预检：缺件直接停用（避免无限重连刷日志、误导用户以为在连）
+        ok, why = await asyncio.to_thread(self.check_deps)
+        if not ok:
+            state.douyin_status = "未启用：" + why
+            self.log("⚠️ 抖音通道未启用：%s" % why)
+            return
         attempt = 0
         while not self._stopped:
             ss = None
@@ -227,8 +246,10 @@ class DouyinProvider:
                     await asyncio.sleep(30)
                     continue
                 uid = str(random.randint(10**18, 9 * 10**18))
+                state.douyin_status = "连接中…"
                 self.log("🎙️ 抖音直播已识别:《%s》 连接中…" % title)
                 ss, rest = await asyncio.to_thread(self._connect, room_id, uid, ttwid)
+                state.douyin_status = "已连接（房间 %s）" % room_id
                 self.log("✅ 抖音弹幕通道已连接（房间 %s）" % room_id)
                 attempt = 0
                 await self._pump(ss, rest)
@@ -239,6 +260,7 @@ class DouyinProvider:
                     break
                 attempt += 1
                 wait = min(30, 2 ** min(attempt, 5))
+                state.douyin_status = "异常重连中（%s）" % str(e)[:40]
                 self.log("⚠️ 抖音通道异常(%s)，%ds 后重连" % (str(e)[:90], wait))
                 await asyncio.sleep(wait)
             finally:
