@@ -407,9 +407,14 @@ def shutil_which_node():
     n = _sh.which("node")
     if n:
         return n
+    cands = []
+    if getattr(sys, "frozen", False):
+        # 打包版：node.exe 在 exe 同级（全家桶包的布局）
+        cands.append(os.path.join(os.path.dirname(sys.executable), "node", "node.exe"))
     base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for cand in (os.path.join(base, "node", "node.exe"),
-                 os.path.join(os.path.dirname(base), "node", "node.exe")):
-        if os.path.exists(cand):
+    cands.append(os.path.join(base, "node", "node.exe"))
+    cands.append(os.path.join(os.path.dirname(base), "node", "node.exe"))
+    for cand in cands:
+        if cand and os.path.exists(cand):
             return cand
     return None
