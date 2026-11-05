@@ -5,8 +5,8 @@
 exe 版本资源（spec）、GUI 标题、自检报告、更新比对全部读这里。
 """
 
-VERSION = "1.2.3"                      # 语义化版本，无 v 前缀
-VERSION_TUPLE = (1, 2, 3, 0)           # exe 版本资源用（四段）
+VERSION = "1.2.4"                      # 语义化版本，无 v 前缀
+VERSION_TUPLE = (1, 2, 4, 0)           # exe 版本资源用（四段）
 PRERELEASE = ""                        # 正式版留空；测试版如 "-beta.1"
 
 DISPLAY = "v" + VERSION + PRERELEASE   # GUI / 日志用

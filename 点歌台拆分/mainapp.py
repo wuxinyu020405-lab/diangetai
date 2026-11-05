@@ -247,6 +247,54 @@ class MusicApp:
             self.log("⏭️ 切歌！")
             state.skip_event.set()
 
+    # ═════════ GUI 发弹幕（v1.2.4）═════════════════════════════════
+    def gui_send_danmaku(self):
+        """主播手动发一条 B站弹幕（复用点歌回执的同一个限频发送器）。"""
+        try:
+            text = (self.entry_send_dm.get() or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            self._set_send_result("⚠️ 内容为空", "#F59E0B")
+            return
+        sender = getattr(self, "danmaku_sender", None)
+        if sender is None:
+            self._set_send_result("❌ 发弹幕不可用（未登录 B站 或缺 bili_jct）", "#EF4444")
+            self.log("❌ 发弹幕失败：发送器未就绪（请先「重新登录 B站」）")
+            return
+        reason = sender.send(text)
+        if reason:
+            self._set_send_result("⚠️ 未发送：%s" % reason, "#F59E0B")
+            self.log("⚠️ 弹幕未发送：%s" % reason)
+            return
+        self._set_send_result("✅ 已排队发送", "#22C55E")
+        self.log("📣 手动发弹幕：%s" % text[:40])
+        try:
+            self.entry_send_dm.delete(0, "end")
+        except Exception:
+            pass
+
+    def _set_send_result(self, msg, color):
+        try:
+            if hasattr(self, "lbl_send_dm_result"):
+                self.lbl_send_dm_result.configure(text=msg, text_color=color)
+        except Exception:
+            pass
+
+    def _on_history_size_change(self, val):
+        """弹幕历史容量输入：即时改内存容量并落配置。"""
+        try:
+            n = int(str(val).strip() or 0)
+        except ValueError:
+            return
+        if n < 0:
+            return
+        self.config["danmaku_history_size"] = n
+        state.danmaku_history_size = n
+        if n > 0 and len(state.danmaku_history) > n:
+            del state.danmaku_history[:len(state.danmaku_history) - n]
+        self.schedule_save_style()
+
     # ═════════ 系统托盘（v1.2.2 需求21）═════════════════════════════
     def minimize_to_tray(self):
         """点 X / 托盘"隐藏"时调用：缩进托盘，程序继续跑。
@@ -570,6 +618,14 @@ class MusicApp:
         web_app.router.add_get('/playing', overlay.handle_index)
         web_app.router.add_get('/queue', overlay.handle_index)
         web_app.router.add_get('/api/data', overlay.handle_api)
+        # v1.2.4：给 AI/脚本的本机双向接口（同端口，token 鉴权，见 httpapi.py）
+        try:
+            import httpapi
+            httpapi.register(web_app)
+            self.log("✅ 本机 API 已启用" if httpapi._cfg_token()
+                     else "ℹ️ 本机 API 未启用：config.json 里设 api_token 后重启即可")
+        except Exception as _e:
+            self.log(f"⚠️ 本机 API 挂载失败（点歌播放不受影响）: {_e}")
         
         runner = web.AppRunner(web_app); await runner.setup()
         # 端口自动顺延：8080 被别的程序占着时，依次试 8081~8090，
@@ -592,6 +648,13 @@ class MusicApp:
                 self.log(f"⚠️ 默认端口 8080 被占用，已自动改用 {bound}，OBS 源地址请用 http://127.0.0.1:{bound}/")
             self.log("✅ OBS 网页服务器已启动")
         musiclib.load_quota_state()   # 第5步：跨重启恢复当日配额记账（跨日自动归零）
+        # v1.2.4：弹幕历史容量（config.json 可调，0=不记录）
+        try:
+            state.danmaku_history_size = int(self.config.get("danmaku_history_size", 200))
+        except Exception:
+            state.danmaku_history_size = 200
+        if state.danmaku_history_size > 0:
+            self.log(f"📜 弹幕历史缓存：最近 {state.danmaku_history_size} 条（供本机 API 读取）")
         self.init_audio_engine()
 
         asyncio.create_task(self.music_player_worker()); asyncio.create_task(self.system_media_worker()); asyncio.create_task(self.lyric_sync_worker())

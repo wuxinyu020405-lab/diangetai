@@ -193,6 +193,8 @@ hiddenimports += [
     "secretstore",
     # v1.2.2：系统托盘（mainapp 方法内 import tray；tray 内 import pystray/PIL）
     "tray", "pystray", "pystray._win32", "PIL", "PIL._tkinter_finder",
+    # v1.2.4：本机 AI 接口（mainapp.main_async 里 try-import，静态抓不到）
+    "httpapi",
     # 抖音 provider 是函数内 import（main_async 里），静态分析抓不到，必须显式列，
     # 否则打包版启用抖音直接 ModuleNotFoundError
     "live_providers", "live_providers.douyin",

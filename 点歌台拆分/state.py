@@ -16,6 +16,12 @@ quota_state = {"date": "", "downloaded": 0, "fail_streak": 0, "cooldown_until": 
 
 current_song = None
 
+# ===== v1.2.4：直播间弹幕历史（环形缓存，供本机 AI 接口 /api/danmaku 读取）=====
+# 容量可调：config.json 的 danmaku_history_size（默认 200，0=关闭不收）。
+# 只存内存，不落盘（隐私+无痕）。每条 {ts, platform, uname, text, is_cmd}
+danmaku_history = []
+danmaku_history_size = 200
+
 skip_event = None
 
 pause_event = None   # v1.1·N1：暂停意图（set=暂停当前歌播放；实测 pygame pause 期间 get_pos 冻结，歌词天然同步）

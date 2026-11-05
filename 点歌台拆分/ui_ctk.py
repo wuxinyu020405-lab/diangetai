@@ -254,6 +254,46 @@ def build(app, root):
                   fg_color=("#64748B", "#475569"), font=_font(12),
                   command=app.update_account_status).pack(anchor="w")
 
+    # ══════════════════ 发弹幕（v1.2.4：主播手动通过本程序发 B站弹幕）══════════════════
+    b = _section(acct_sc, "发弹幕", "以你的账号在 B站直播间发一条；每分钟最多 3 条")
+    h = _row(b, "内容")
+    app.entry_send_dm = ctk.CTkEntry(h, width=330, font=_font(12),
+                                     placeholder_text="输入弹幕内容（最多 40 字）")
+    app.entry_send_dm.pack(side="left")
+    app.btn_send_dm = ctk.CTkButton(h, text="发送", width=64, height=28, corner_radius=8,
+                                    font=_font(11, True), fg_color=ACCENT,
+                                    command=app.gui_send_danmaku)
+    app.btn_send_dm.pack(side="left", padx=(6, 0))
+    # 回车即发送（与输入框绑定，不必点按钮）
+    app.entry_send_dm.bind("<Return>", lambda _e: app.gui_send_danmaku())
+    app.lbl_send_dm_result = ctk.CTkLabel(b, text="", font=_font(11), anchor="w")
+    app.lbl_send_dm_result.pack(anchor="w", pady=(4, 0))
+
+    # ══════════════════ 本机 AI 接口（v1.2.4）══════════════════
+    b = _section(acct_sc, "本机 AI 接口", "给 AI/脚本读写本机；仅 127.0.0.1，必须带 token")
+    h = _row(b, "API Token")
+    app.entry_api_token = ctk.CTkEntry(h, width=330, font=_font(12),
+                                       placeholder_text="留空=接口关闭；填任意字符串=启用")
+    app.entry_api_token.insert(0, str(app.config.get("api_token", "") or ""))
+    app.entry_api_token.pack(side="left")
+    live_entry(app.entry_api_token, lambda v: (app.config.__setitem__("api_token", v.strip()),
+                                               app.schedule_save_style()))
+    app.lbl_api_hint = ctk.CTkLabel(
+        b, text=f"改完需重启生效。接口地址：http://127.0.0.1:{{端口}}/api/state?token=你的token\n"
+               "可用：/api/state /api/danmaku /api/queue（读） · /api/send /api/queue/add"
+               " /api/queue/remove /api/queue/move /api/skip /api/pause（写）",
+        font=_font(10), text_color=MUTED, anchor="w", justify="left")
+    app.lbl_api_hint.pack(anchor="w", pady=(6, 0))
+
+    h = _row(b, "弹幕历史条数")
+    app.entry_dm_hist = ctk.CTkEntry(h, width=90, font=_font(12),
+                                     placeholder_text="200")
+    app.entry_dm_hist.insert(0, str(app.config.get("danmaku_history_size", 200)))
+    app.entry_dm_hist.pack(side="left")
+    live_entry(app.entry_dm_hist, app._on_history_size_change)
+    ctk.CTkLabel(h, text="0=不记录；改完需重启生效", font=_font(10),
+                 text_color=MUTED).pack(side="left", padx=(8, 0))
+
     # ══════════════════ 队列管理（v1.2.2：查看/删除 排队·就绪点歌）══════════════════
     qm_page = pages[name_queue_page]
     qm_sc = scroller(qm_page)

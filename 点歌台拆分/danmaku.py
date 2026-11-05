@@ -14,6 +14,24 @@ import musiclib
 import state
 
 
+def _record_history(text, uname, platform, is_cmd):
+    """v1.2.4：把收到的弹幕记进环形历史（容量 state.danmaku_history_size，
+    0=关闭）。只存内存不落盘，供本机 AI 接口读取，无痕不留存。"""
+    try:
+        cap = int(getattr(state, "danmaku_history_size", 200) or 0)
+        if cap <= 0:
+            return
+        hist = state.danmaku_history
+        import time as _t
+        hist.append({"ts": _t.time(), "platform": platform,
+                     "uname": uname or "神秘观众", "text": text,
+                     "is_cmd": bool(is_cmd)})
+        if len(hist) > cap:
+            del hist[:len(hist) - cap]
+    except Exception:
+        pass
+
+
 def handle_message(app, text, uname, platform="bilibili"):
     """平台无关的指令入口：切歌/暂停/继续/点歌。
     两平台行为对齐的关键——任何 provider 收到 chat 都调这里。"""
@@ -21,6 +39,9 @@ def handle_message(app, text, uname, platform="bilibili"):
     if not text:
         return
     tag = "" if platform == "bilibili" else "[%s] " % platform
+    # v1.2.4：先记账再处理（无论是不是指令都留档，供 AI 读直播间弹幕）
+    _is_cmd = text in ("切歌", "暂停", "继续") or text.startswith("点歌")
+    _record_history(text, uname, platform, _is_cmd)
     if text == "切歌":
         if state.skip_event and not state.skip_event.is_set():
             app.log("%s⏭️ 收到【切歌】指令！" % tag)
