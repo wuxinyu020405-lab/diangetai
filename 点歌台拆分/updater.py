@@ -1,30 +1,35 @@
 # -*- coding: utf-8 -*-
-"""自动更新：GitHub Releases 检查 + 一键自动升级（v1.2.1 需求 #19 拍板）。
+"""自动更新：GitHub Releases 检查 + 一键自动升级（v1.2.3 修复版）。
 
-行为分层：
-  - fetch_latest_full()  查 Releases API（8~12s 超时，失败静默 (None,None,None)）
-      返回 (tag, html_url, assets)；assets 里含 name/size/browser_download_url/digest
-  - start_background_check(app)   启动 20s 后静默查一次；有新版 → 弹窗问"立即更新"
-  - manual_check(app)  手动触发：无论结果都给明确反馈
-  - 用户点【立即更新】→ download_and_apply(app, tag, asset)：
-      后台线程下载 portable zip → size+SHA256 校验 → 写 _update_pending.json
-      → 弹窗确认 → spawn 更新器 worker → 主程序落盘配置并 os._exit(0)
-      更新器等旧进程退出后按白名单覆盖（不碰 config/credential/music_cache/
-      sign.js/node），全成功才生效，失败自动回滚，然后重启新版。
+v1.2.1/v1.2.2 的教训（真机 WinError 5 实录，朋友装机实测）：更新器 worker
+用 点歌台.exe 自己跑（--__upd__），它运行时从 _internal 加载自己的 python
+DLL——**自己锁自己**。Windows 拒绝改名含被打开文件的目录 →
+`_internal -> _internal.bak` 拒绝访问 → 换名失败回滚 → 永远更新不上。
 
-安全口径（拍板记录）：只走 GitHub 官方 HTTPS 资产；校验 size+digest 防半包防劫持；
-下载失败回退"复制下载地址"手动通道；未签名自我替换的杀软风险用户已知情。
+v1.2.3 修法（Chrome/VSCode 同款套路）：换文件的活交给**外部进程**——
+Windows 自带的 powershell.exe（在 System32，不加载安装目录任何文件，
+天然不锁目标）。主程序只做：下载 → size+SHA256 校验 → 解压到 staging →
+包内版本核对 → 写 marker → 生成 ps1 → spawn → 退出。ps1 等主进程死透后
+按白名单 .bak 换名替换，失败回滚，成功后清理并重启新版，脚本自删。
+
+安全口径不变：只走 GitHub 官方 HTTPS 资产；校验防半包防劫持；白名单外的
+用户数据（config/credential/quota_state/music_cache/desktop_lyric/
+sign.js/node/日志）碰都不碰；失败回退"复制下载地址"手动通道。
 仓库地址留常量 REPO，fork 后改这一处即可。
 """
 
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.request
+import zipfile
 
 import version
 import settings
@@ -33,11 +38,14 @@ REPO = "wuxinyu020405-lab/diangetai"          # GitHub 仓库（owner/name）
 _API = "https://api.github.com/repos/{}/releases/latest".format(REPO)
 _UA = {"User-Agent": "DianGeTai-Updater", "Accept": "application/vnd.github+json"}
 
-_notified = {"ver": None}     # 同一版本只提醒一次
+_notified = {"ver": None}      # 同一版本后台检查只提醒一次（每进程）
 _downloading = {"running": False}
+_offer_busy = {"v": False}     # v1.2.3：同一时刻只允许一个"发现新版"弹窗（修重复弹窗）
 
 # 更新白名单：只有这些会被替换（相对 base 根）。其余用户文件碰都不碰。
 WHITELIST = ["点歌台.exe", "_internal", "dotnet", "douyin_sign", "使用说明.md"]
+
+EXE_NAME = "点歌台.exe"
 
 
 def fetch_latest(timeout=8):
@@ -63,7 +71,7 @@ def fetch_latest_full(timeout=8):
 
 
 def pick_portable_asset(assets, tag):
-    """挑当前版本的便携 zip：名字含 tag 的 portable zip，退回任意 portable zip。"""
+    """挑当前版本的便携 zip：名字含 tag 的 portable zip，退回任意 zip。"""
     zips = [a for a in assets if str(a.get("name", "")).lower().endswith(".zip")]
     if not zips:
         return None
@@ -93,7 +101,6 @@ class _ProgressDialog:
         self.win = None
         self.lbl = None
         self.bar = None
-        self._title = title
         try:
             import tkinter as tk
             from tkinter import ttk
@@ -131,8 +138,272 @@ class _ProgressDialog:
             pass
 
 
+# ════════════════ ps1 生成与 spawn（v1.2.3 核心）════════════════════════
+
+def _psq(s):
+    """PowerShell 单引号字符串转义。"""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def _sanitize_tag(tag):
+    """tag 会进 ps1 文本，只放行安全字符（防注入）。"""
+    t = re.sub(r"[^A-Za-z0-9._+\-]", "", str(tag or ""))
+    return t[:32]
+
+
+_PS1_TEMPLATE = r'''
+# DianGeTai auto-update worker (generated, self-deleting)
+$ErrorActionPreference = 'Stop'
+$base      = {base}
+$staging   = {staging}
+$marker    = {marker}
+$exe       = {exe}
+$ps1Self   = {self}
+$pid0      = {pid}
+$restart   = {restart}
+$waitSec   = {wait}
+$tag       = {tag}
+$wl        = @({whitelist})
+$log  = Join-Path $base '更新日志.txt'
+$stat = Join-Path $base '_update_status.json'
+function Log($m) {{ try {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format 'HH:mm:ss') + ' ' + $m) -Encoding UTF8 }} catch {{}} }}
+# v1.2.3：结局落盘给主程序看（v1.2.1 的失败只写日志、日志还被下次覆盖 →
+# 用户只看到"重开还是旧版"，完全不知道发生了什么）
+function Stat($status, $msg) {{
+    try {{
+        @{{ tag=$tag; status=$status; message=$msg; ts=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss') }} |
+            ConvertTo-Json -Compress | Set-Content -LiteralPath $stat -Encoding UTF8 -Force
+    }} catch {{}}
+}}
+Log "=== 更新开始: $tag (ps1 worker) ==="
+
+# 1) 等主进程退出。绝不强杀（可能正在直播）；超时=放弃，marker 保留下次启动重试
+if ($pid0 -gt 0) {{
+    $t = 0
+    while ($t -lt $waitSec) {{
+        if (-not (Get-Process -Id $pid0 -ErrorAction SilentlyContinue)) {{ break }}
+        Start-Sleep -Seconds 1; $t++
+    }}
+    if (Get-Process -Id $pid0 -ErrorAction SilentlyContinue) {{
+        Log "主进程 $pid0 在 $waitSec 秒内未退出，本次放弃（marker 保留，下次启动自动重试）"
+        Stat 'stalled' "程序在 $waitSec 秒内没有退出，更新未开始（更新包已就绪，下次启动自动重试）"
+        try {{ Remove-Item -LiteralPath $ps1Self -Force }} catch {{}}
+        exit 1
+    }}
+}}
+Start-Sleep -Milliseconds 1200    # 等文件句柄彻底释放
+
+if (-not (Test-Path -LiteralPath $staging)) {{
+    Log "staging 缺失（被清理/上次失败），作废 marker，下次启动重新走完整流程"
+    Stat 'dropped' "更新暂存文件已丢失，本次更新作废（下次启动会重新下载）"
+    try {{ Remove-Item -LiteralPath $marker -Force }} catch {{}}
+    try {{ Remove-Item -LiteralPath $ps1Self -Force }} catch {{}}
+    exit 1
+}}
+
+# 裸重命名：[IO.*]::Move 是单个 rename 系统调用——失败时源目录**原样不动**、
+# 零复制垃圾。绝不用 Move-Item：它失败会回退成"边复制边删"，把旧安装也弄残
+# （测试注入实证：锁定目录 Move-Item 后源目录文件散进嵌套 .bak）。
+function Move-Hard($src, $dst) {{
+    if (-not (Test-Path -LiteralPath $src)) {{ return }}
+    if ((Get-Item -LiteralPath $src).PSIsContainer) {{
+        [System.IO.Directory]::Move($src, $dst)
+    }} else {{
+        [System.IO.File]::Move($src, $dst)
+    }}
+}}
+
+# 2) 白名单替换：旧→.bak，新→正式；douyin_sign 只换壳文件，sign.js 碰都不碰
+# moved 项带 $mine 标记：True=dst 当时确实被换走（回滚可删现 dst 再还原 bak）；
+# Move 当场失败=dst 还是完好旧版 → 回滚绝不碰它。
+$moved = @()
+$fail = $false
+foreach ($item in $wl) {{
+    $src = Join-Path $staging $item
+    $dst = Join-Path $base $item
+    if (-not (Test-Path -LiteralPath $src)) {{ Log "包内缺 $item，跳过"; continue }}
+    $movedNow = $false
+    $hadDst = (Test-Path -LiteralPath $dst)
+    try {{
+        if ($item -eq 'douyin_sign') {{
+            if (-not $hadDst) {{ New-Item -ItemType Directory -Path $dst | Out-Null }}
+            foreach ($sh in @('sign_runner.js','package.json')) {{
+                $s2 = Join-Path $src $sh
+                if (-not (Test-Path -LiteralPath $s2)) {{ continue }}
+                $d2 = Join-Path $dst $sh
+                if (Test-Path -LiteralPath $d2) {{
+                    if (Test-Path -LiteralPath "$d2.bak") {{ Remove-Item -LiteralPath "$d2.bak" -Force }}
+                    Move-Hard $d2 "$d2.bak"
+                    $moved += ,@($d2, "$d2.bak", $true)
+                }}
+                Copy-Item -LiteralPath $s2 -Destination $d2 -Force
+            }}
+            Log "douyin_sign 壳已更新（sign.js 未碰）"
+            continue
+        }}
+        if ($hadDst) {{
+            if (Test-Path -LiteralPath "$dst.bak") {{ Remove-Item -LiteralPath "$dst.bak" -Recurse -Force }}
+            Move-Hard $dst "$dst.bak"
+            $movedNow = $true
+            $moved += ,@($dst, "$dst.bak", $true)
+        }}
+        Copy-Item -LiteralPath $src -Destination $dst -Recurse -Force
+        if (-not $movedNow -and -not $hadDst) {{ $moved += ,@($dst, "$dst.bak", $true) }}
+        Log "已替换 $item"
+    }} catch {{
+        Log "FAIL 替换 $item : $_"
+        # Move-Hard 失败=目录原样未动（原子调用零副作用），回滚不能碰它，
+        # 也绝不能按"包内同名"去清理 dst——那会误删装机自带的旧文件。
+        # 只有"原本没有 dst 的新项 copy 出残包"才登记 mine=True 供回滚整删。
+        if (-not $movedNow -and -not $hadDst -and (Test-Path -LiteralPath $dst)) {{
+            $moved += ,@($dst, "$dst.bak", $true)
+        }}
+        $fail = $true
+        break
+    }}
+}}
+
+if ($fail) {{
+    Log "开始回滚"
+    for ($i = $moved.Count - 1; $i -ge 0; $i--) {{
+        $dst = $moved[$i][0]; $bak = $moved[$i][1]; $mine = $moved[$i][2]
+        try {{
+            if ($mine) {{
+                if (Test-Path -LiteralPath $dst) {{ Remove-Item -LiteralPath $dst -Recurse -Force }}
+                Move-Hard $bak $dst
+            }}
+        }} catch {{ Log "WARN 回滚 $dst 失败: $_（保留 .bak 可手动恢复）" }}
+    }}
+    Log "已回滚到旧版本（marker 保留，下次启动可重试或手动下载）"
+    Stat 'rolled_back' "升级到 $tag 失败，已自动回滚到旧版本（你的设置和数据未受影响）。更新包已保留，下次启动会自动重试。"
+    try {{ Remove-Item -LiteralPath $ps1Self -Force }} catch {{}}
+    exit 1
+}}
+
+# 3) 成功：清 .bak → 清 marker/staging → 重启新版
+foreach ($triple in $moved) {{
+    try {{ if (Test-Path -LiteralPath $triple[1]) {{ Remove-Item -LiteralPath $triple[1] -Recurse -Force }} }} catch {{}}
+}}
+Get-ChildItem -LiteralPath $base -Filter '*.bak' -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($p in @($marker, $staging)) {{
+    if ($p -and (Test-Path -LiteralPath $p)) {{ try {{ Remove-Item -LiteralPath $p -Recurse -Force }} catch {{}} }}
+}}
+Log "全部替换成功，清理完成"
+Stat 'ok' "已成功升级到 $tag"
+if ($restart) {{
+    try {{ Start-Process -FilePath $exe -WorkingDirectory $base; Log "新版已启动" }}
+    catch {{ Log "WARN 重启失败: $_（请手动打开点歌台）" }}
+}}
+Log "=== 更新完成 $tag ==="
+try {{ Remove-Item -LiteralPath $ps1Self -Force }} catch {{}}
+exit 0
+'''
+
+
+def write_ps1(base, plan):
+    """按 plan 生成 ps1 到 %TEMP%，返回路径。plan 需含 tag/staging/marker/pid/restart。"""
+    ps1 = os.path.join(tempfile.gettempdir(),
+                       "dgt_update_%d.ps1" % (plan.get("pid") or os.getpid()))
+    text = _PS1_TEMPLATE.format(
+        base=_psq(base),
+        staging=_psq(plan["staging"]),
+        marker=_psq(plan["marker"]),
+        exe=_psq(os.path.join(base, EXE_NAME)),
+        self=_psq(ps1),
+        pid=int(plan.get("pid") or 0),
+        restart="$true" if plan.get("restart") else "$false",
+        wait=int(plan.get("wait_timeout") or 120),
+        tag=_psq(_sanitize_tag(plan.get("tag", ""))),
+        whitelist=",".join(_psq(w) for w in (plan.get("whitelist") or WHITELIST)),
+    )
+    with open(ps1, "w", encoding="utf-8-sig") as f:   # BOM：PS 5.1 正确解析中文
+        f.write(text)
+    return ps1
+
+
+def spawn_ps_worker(base, plan):
+    """生成并拉起 ps1 worker。冻结版加 CREATE_NO_WINDOW 防黑窗一闪。"""
+    ps1 = write_ps1(base, plan)
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+           "-WindowStyle", "Hidden", "-File", ps1]
+    flags = 0x08000000 if getattr(sys, "frozen", False) else 0
+    subprocess.Popen(cmd, cwd=tempfile.gettempdir(),
+                     creationflags=flags, close_fds=True)
+    return ps1
+
+
+def extract_zip(zip_path, staging, log=None):
+    """解压便携 zip 到 staging（剥掉 zip 根目录名），返回文件数。zip-slip 防呆。"""
+    shutil.rmtree(staging, ignore_errors=True)
+    os.makedirs(staging, exist_ok=True)
+    n = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        bad = zf.testzip()
+        if bad:
+            raise RuntimeError(f"zip 损坏于 {bad}")
+        names = zf.infolist()
+        roots = {i.filename.split("/")[0] for i in names if "/" in i.filename}
+        prefix = (list(roots)[0] + "/") if len(roots) == 1 else ""
+        for info in names:
+            rel = info.filename[len(prefix):] if prefix else info.filename
+            if not rel:
+                continue
+            dst = os.path.normpath(os.path.join(staging, rel))
+            if not dst.startswith(os.path.normpath(staging) + os.sep):
+                continue
+            if info.is_dir():
+                os.makedirs(dst, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with zf.open(info) as src, open(dst, "wb") as out:
+                shutil.copyfileobj(src, out)
+            n += 1
+            if log and n % 2000 == 0:
+                log(f"解压中… {n}")
+    return n
+
+
+def _staging_version_ok(staging, tag):
+    """staging 里 version.py 必须含目标版本号，防错包。缺失/不符都算不符。"""
+    vp = os.path.join(staging, "_internal", "version.py")
+    try:
+        txt = open(vp, "r", encoding="utf-8").read()
+    except OSError:
+        return False
+    return _sanitize_tag(tag).lstrip("vV") in txt
+
+
+def resume_pending_update(marker_path):
+    """启动时发现挂起 marker（上次选了"稍后"）→ 重新拉起 ps1 完成更新。
+    返回 True=已拉起 worker（调用方应立即退出让位）；False=marker 作废照常启动。"""
+    try:
+        plan = json.load(open(marker_path, "r", encoding="utf-8"))
+    except Exception:
+        _rm(marker_path)
+        return False
+    base = settings.BASE_DIR
+    if not os.path.isdir(plan.get("staging") or ""):
+        # staging 没了（被清理/上次失败）→ 作废 marker，正常启动，
+        # 后台检查会重新走完整下载流程
+        _rm(marker_path)
+        return False
+    plan["pid"] = os.getpid()
+    plan["restart"] = True
+    plan["marker"] = marker_path
+    try:
+        with open(marker_path, "w", encoding="utf-8") as f:
+            json.dump(plan, f, ensure_ascii=False)
+        spawn_ps_worker(base, plan)
+        return True
+    except Exception:
+        return False
+
+
+# ════════════════ 下载 → 解压 → 弹窗确认 ════════════════
+
 def download_and_apply(app, tag, asset, html_url):
-    """线程入口：下载→校验→写标记→spawn 更新器→退出。失败回退手动下载。"""
+    """线程入口：下载→校验→解压→写 marker→弹窗。失败回退手动下载。"""
     if _downloading["running"]:
         return
     _downloading["running"] = True
@@ -141,7 +412,10 @@ def download_and_apply(app, tag, asset, html_url):
         try:
             _do_download(app, tag, asset, html_url)
         except Exception as e:
-            app.log(f"❌ 自动更新失败：{e}（可改用手动下载）")
+            try:
+                app.log(f"❌ 自动更新失败：{e}（可改用手动下载）")
+            except Exception:
+                pass
             _fallback_manual(app, html_url)
         finally:
             _downloading["running"] = False
@@ -164,8 +438,15 @@ def _fallback_manual(app, url):
         pass
 
 
+def _rm(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def _do_download(app, tag, asset, html_url):
-    name = asset.get("name") or f"diangetai-{tag}-portable.zip"
+    name = "dgt_update.zip"   # 固定文件名：不用资产名，杜绝奇怪字符进路径/脚本
     url = asset.get("browser_download_url")
     if not url:
         raise RuntimeError("Release 资产缺下载地址")
@@ -176,9 +457,10 @@ def _do_download(app, tag, asset, html_url):
     dl_dir = os.path.join(base, "_update_dl")
     os.makedirs(dl_dir, exist_ok=True)
     zip_path = os.path.join(dl_dir, name)
+    staging = os.path.join(base, "_update_staging")
 
     dlg = _ProgressDialog(app, f"正在下载 {tag}")
-    app.log(f"⬇️ 开始下载 {name}（约 {size/1024/1024:.0f} MB）…")
+    app.log(f"⬇️ 开始下载新版（约 {size/1024/1024:.0f} MB）…")
     req = urllib.request.Request(url, headers={"User-Agent": "DianGeTai-Updater"})
     t0 = time.time()
     last_pct = -10
@@ -195,102 +477,89 @@ def _do_download(app, tag, asset, html_url):
                 pct = int(got * 100 / total) if total else 0
                 if pct - last_pct >= 5:
                     last_pct = pct
-                    mb = got / 1024 / 1024
-                    dlg.set(pct, f"{mb:.0f} / {total/1024/1024:.0f} MB（{pct}%）")
+                    dlg.set(pct, f"{got/1024/1024:.0f} / {total/1024/1024:.0f} MB（{pct}%）")
     except Exception:
         dlg.close()
-        try:
-            os.remove(zip_path)
-        except OSError:
-            pass
+        _rm(zip_path)
         raise RuntimeError("下载中断")
 
-    # 校验：大小 + SHA256（digest 缺失时只校验大小并明示）
+    # 校验：大小 + SHA256
     actual = os.path.getsize(zip_path)
     if size and actual != size:
-        dlg.close(); os.remove(zip_path)
+        dlg.close(); _rm(zip_path)
         raise RuntimeError(f"下载包大小不符（期望 {size}，实际 {actual}），已丢弃")
     if digest:
-        app.log("校验 SHA256…（大包约需十几秒）")
-        got_hex = _sha256_of(zip_path)
-        if got_hex != digest:
-            dlg.close(); os.remove(zip_path)
+        dlg.set(100, "校验 SHA256…（约十几秒）")
+        app.log("校验 SHA256…")
+        if _sha256_of(zip_path) != digest:
+            dlg.close(); _rm(zip_path)
             raise RuntimeError("SHA256 校验失败（包可能被劫持或损坏），已丢弃")
-    dlg.set(100, f"下载完成，用时 {time.time()-t0:.0f}s")
-    time.sleep(0.6)
-    dlg.close()
-    app.log(f"✅ {name} 下载并校验通过")
+    app.log(f"✅ 下载校验通过（{time.time()-t0:.0f}s）")
 
-    # 写待更新标记（marker 先落盘：选"稍后"时它保证下次启动自动完成更新；
-    # worker 只在用户确认"立即重启"后才 spawn——否则会出现 worker 干等
-    # 90 秒把还在直播的主进程强杀的恶性时序）
+    # 解压 + 包内版本核对（主程序退出前做完；ps1 只负责换文件，停机时间最短）
+    dlg.set(100, "解压中…")
+    n = extract_zip(zip_path, staging, log=app.log)
+    if not _staging_version_ok(staging, tag):
+        dlg.close()
+        shutil.rmtree(staging, ignore_errors=True); _rm(zip_path)
+        raise RuntimeError("包内版本号与目标不符，已丢弃（防错包）")
+    _rm(zip_path)      # staging 就绪，zip 使命完成，省 128MB
+    dlg.set(100, f"就绪：{n} 个文件已解压")
+    app.log(f"✅ 解压完成（{n} 个文件），等待你确认重启")
+    time.sleep(0.4)
+    dlg.close()
+
+    # 写 marker（选"稍后"时它保证下次启动自动完成更新；立即模式确认时再改写）
     marker = os.path.join(base, "_update_pending.json")
     plan = {
-        "tag": tag,
-        "zip": zip_path,
-        "staging": os.path.join(base, "_update_staging"),
+        "tag": _sanitize_tag(tag),
+        "staging": staging,
+        "marker": marker,
         "whitelist": WHITELIST,
-        "pid": os.getpid(),
+        "pid": 0,          # 稍后模式=不等任何进程；立即模式在确认时改写
+        "restart": False,
     }
     with open(marker, "w", encoding="utf-8") as f:
         json.dump(plan, f, ensure_ascii=False)
 
-    _prompt_restart(app, tag, marker)
+    _prompt_restart(app, tag, marker, plan)
 
 
-def _spawn_worker(base, marker):
-    """拉起更新器 worker（它自己等主进程退出再动手）。
-    主程序是 console=False 的 GUI exe，spawn 的子进程天然无黑窗，不需要
-    DETACHED/CREATE_NO_WINDOW 标志；子进程也不会因父进程退出而死（Windows
-    默认无作业对象），worker 活得比主程序久。"""
-    if getattr(sys, "frozen", False):
-        cmd = [sys.executable, "--__upd__"]
-    else:
-        cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                            "autoupdater.py")]
-    try:
-        subprocess.Popen(cmd, cwd=base, close_fds=True)
-        return True
-    except Exception as e:
-        try:
-            os.remove(marker)
-        except OSError:
-            pass
-        raise RuntimeError(f"更新器启动失败：{e}")
-
-
-def _prompt_restart(app, tag, marker):
-    """主线程弹窗：立即重启（spawn 更新器后退出）或稍后（下次启动自动完成）。"""
+def _prompt_restart(app, tag, marker, plan):
+    """主线程弹窗：立即重启（spawn ps1 后退出）或稍后（下次启动自动完成）。"""
     def _ui():
         from tkinter import messagebox
         ans = messagebox.askyesno(
             "准备就绪",
-            f"新版本 {tag} 已下载并校验完成。\n\n"
+            f"新版本 {tag} 已下载、校验并解压完成。\n\n"
             "【是】立即重启完成更新（几秒钟，设置/登录/缓存全部保留）\n"
-            "【否】稍后我自己关窗口——下次启动点歌台时会自动完成更新")
+            "【否】稍后——下次启动点歌台时会自动完成更新")
         if ans:
             try:
-                _spawn_worker(settings.BASE_DIR, marker)
+                plan["pid"] = os.getpid()
+                plan["restart"] = True
+                with open(marker, "w", encoding="utf-8") as f:
+                    json.dump(plan, f, ensure_ascii=False)
+                spawn_ps_worker(settings.BASE_DIR, plan)
             except Exception as e:
-                app.log(f"❌ {e}")
+                app.log(f"❌ 更新器启动失败：{e}")
+                _fallback_manual(app, "")
                 return
             _quit_for_update(app)
         else:
             app.log(f"⏳ 更新已就绪：{tag}。下次启动点歌台时自动完成安装。")
     try:
-        # 弹窗必须在主线程；本函数从下载线程调用
         app.root.after(0, _ui)
     except Exception:
         pass
 
 
 def _quit_for_update(app):
-    """显式落盘 → 杀残留子进程 → 立即退。更新器在等着接手。"""
+    """显式落盘 → 杀残留子进程 → 立即退。ps1 worker 在等着接手。"""
     try:
         app.save_style_config()
     except Exception:
         pass
-    # 兜底清 node 子进程（抖音签名是一次性子进程；此处清孤儿残留保险 #18 方向）
     try:
         subprocess.run(["taskkill", "/F", "/IM", "node.exe", "/T"],
                        capture_output=True, creationflags=0x08000000, timeout=8)
@@ -300,35 +569,94 @@ def _quit_for_update(app):
 
 
 def _offer_update(app, tag, url, assets):
-    """发现新版后的统一入口：问用户 立即自动更新 / 手动下载 / 忽略。"""
+    """发现新版后的统一入口。v1.2.3：全局 busy 防弹窗重复（后台检查+手动检查撞车）。"""
+    if _offer_busy["v"]:
+        try:
+            app.log("ℹ️ 更新弹窗已在显示中，跳过重复弹窗")
+        except Exception:
+            pass
+        return
+    _offer_busy["v"] = True
     asset = pick_portable_asset(assets or [], tag)
 
     def _ui():
-        from tkinter import messagebox
-        if asset:
-            ans = messagebox.askyesno(
-                "点歌台 更新",
-                f"发现新版本 {tag}（当前 {version.DISPLAY}）\n\n"
-                "【是】自动更新——下载并安装新版，你的设置/登录/Cookie/缓存全部保留，\n"
-                f"        下载约 {int(asset.get('size', 0))/1024/1024:.0f} MB，完成后自动重启\n"
-                "【否】只复制下载地址，我自己手动弄")
-            if ans:
-                download_and_apply(app, tag, asset, url)
-                return
         try:
-            app.root.clipboard_clear(); app.root.clipboard_append(url or "")
-            messagebox.showinfo("点歌台 更新",
-                                f"新版本 {tag} 的下载地址已复制到剪贴板，浏览器打开即可。")
-        except Exception:
-            pass
+            from tkinter import messagebox
+            if asset:
+                ans = messagebox.askyesno(
+                    "点歌台 更新",
+                    f"发现新版本 {tag}（当前 {version.DISPLAY}）\n\n"
+                    "【是】自动更新——下载并安装新版，你的设置/登录/Cookie/缓存全部保留，\n"
+                    f"        下载约 {int(asset.get('size', 0))/1024/1024:.0f} MB，完成后自动重启\n"
+                    "【否】只复制下载地址，我自己手动弄")
+                if ans:
+                    download_and_apply(app, tag, asset, url)
+                    return
+            try:
+                app.root.clipboard_clear(); app.root.clipboard_append(url or "")
+                messagebox.showinfo("点歌台 更新",
+                                    f"新版本 {tag} 的下载地址已复制到剪贴板，浏览器打开即可。")
+            except Exception:
+                pass
+        finally:
+            _offer_busy["v"] = False
     try:
         app.root.after(0, _ui)
+    except Exception:
+        _offer_busy["v"] = False
+
+
+def _status_path():
+    return os.path.join(settings.BASE_DIR, "_update_status.json")
+
+
+def _ps1_status_write(var_expr, value_expr):
+    """生成 ps1 里写状态文件的片段（供 Python 侧拼进模板）。"""
+    return ('try { @{tag=$tag; status=' + value_expr + '; ts=(Get-Date -Format '
+            "'%Y-%m-%d %H:%M:%S')} | ConvertTo-Json -Compress | "
+            'Set-Content -LiteralPath ' + var_expr + " -Encoding UTF8 -Force } catch {}")
+
+
+def read_last_update_result(base=None):
+    """v1.2.3：读上次更新结局（成功/失败原因），供启动时提示。
+    返回 dict 或 None。读完即删（避免每次启动都提示同一件事）。"""
+    p = os.path.join(base or settings.BASE_DIR, "_update_status.json")
+    try:
+        with open(p, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        os.remove(p)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _notified_state_path():
+    return os.path.join(settings.BASE_DIR, "_update_notified.json")
+
+
+def _load_notified_ver():
+    """v1.2.3：已提醒过的版本号持久化。v1.2.1 的 _notified 只活在内存里 →
+    程序重启后 20s 后台检查必然再弹一次，用户观感就是"隔一会儿又弹一个窗"。"""
+    try:
+        with open(_notified_state_path(), "r", encoding="utf-8") as f:
+            return (json.load(f) or {}).get("ver") or None
+    except Exception:
+        return None
+
+
+def _save_notified_ver(tag):
+    try:
+        with open(_notified_state_path(), "w", encoding="utf-8") as f:
+            json.dump({"ver": tag, "ts": time.strftime("%Y-%m-%d %H:%M:%S")}, f,
+                      ensure_ascii=False)
     except Exception:
         pass
 
 
 def start_background_check(app):
     """启动后延迟静默检查。不阻塞、不打扰（除非真有新版）。"""
+    _notified["ver"] = _load_notified_ver()   # 跨重启去重：已提醒过的版本不再弹
+
     def _worker():
         time.sleep(20)
         tag, url, assets = fetch_latest_full()
@@ -336,6 +664,7 @@ def start_background_check(app):
             return
         if version.is_newer(tag, version.VERSION) and _notified["ver"] != tag:
             _notified["ver"] = tag
+            _save_notified_ver(tag)           # 落盘：重启后不再重复提醒同一版本
             app.log(f"🔔 发现新版本 {tag}（当前 {version.DISPLAY}），弹窗可选自动更新")
             _offer_update(app, tag, url, assets)
     threading.Thread(target=_worker, daemon=True).start()
@@ -345,6 +674,9 @@ def manual_check(app):
     """GUI 按钮触发的显式检查：任何结果都给反馈。"""
     if _downloading["running"]:
         app.log("正在下载更新中，请稍候…")
+        return
+    if _offer_busy["v"]:
+        app.log("ℹ️ 更新弹窗已在显示中")
         return
 
     def _worker():
