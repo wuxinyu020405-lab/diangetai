@@ -33,6 +33,59 @@ if any(str(a).startswith("--__upd") for a in sys.argv):
     sys.exit(0)
 
 
+# ── v1.2.5：`--quit` 外部优雅退出通道（覆盖升级用）──────────────────
+# 安装包要把已运行的点歌台"体面关掉"，不能靠用户在托盘右键，更不能强杀丢配置。
+# 通道 = 命名事件 state.QUIT_EVENT_NAME：本分支只置位事件，真正退出由已运行
+# 实例自己走 quit_app（落盘 → 停托盘 → 清 node 子进程 → 退出）。
+# 本进程置位后立即退出，且放在所有重导入（ctk / pygame / webview）之前，
+# 启动开销只有解释器本身。
+# 注意：这**不改变**"用户点 X 只缩托盘"的既有行为——只有外部显式调用才触发。
+def _signal_running_instance_quit():
+    """置位退出事件并等已运行实例退干净。
+
+    返回 0 = 已通知（或本来就没有实例在跑），1 = 等实例退出超时。
+    事件由 mainapp._start_quit_watcher 创建；没有实例时 OpenEventW 失败，
+    首次安装（程序还没跑过）走的就是这条路径。
+    """
+    if os.name != "nt":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    import state
+    kernel32 = ctypes.windll.kernel32
+    EVENT_MODIFY_STATE = 0x0002
+    SYNCHRONIZE = 0x00100000
+    kernel32.OpenEventW.restype = wintypes.HANDLE
+    kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+    kernel32.SetEvent.restype = wintypes.BOOL
+    kernel32.OpenMutexW.restype = wintypes.HANDLE
+    kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    h = kernel32.OpenEventW(EVENT_MODIFY_STATE, False, state.QUIT_EVENT_NAME)
+    if not h:
+        return 0
+    try:
+        kernel32.SetEvent(h)
+    finally:
+        kernel32.CloseHandle(h)
+    # 等实例真退干净再返回：轮询单实例互斥体是否还存在（最多 15 秒），
+    # 免得调用方（安装包 / 脚本）刚发完信号就去动安装目录。
+    for _ in range(60):
+        hm = kernel32.OpenMutexW(SYNCHRONIZE, False, state.APP_MUTEX_NAME)
+        if not hm:
+            return 0
+        kernel32.CloseHandle(hm)
+        time.sleep(0.25)
+    return 1
+
+
+if "--quit" in sys.argv:
+    sys.exit(_signal_running_instance_quit())
+
+
 def _setup_dotnet_for_webview():
     """把 .NET 运行时位置准备好，让 coreclr 能找到 WindowsDesktop 共享框架。
 
@@ -107,7 +160,9 @@ def _acquire_single_instance():
     # Local\ = 当前登录会话内互斥（普通权限可建）。
     # 不用 Global\：那需要管理员权限，普通用户下 CreateMutex 会失败返回 NULL，
     # 导致下面的"创建失败→放行"分支触发，锁彻底失效。单实例只需同会话互斥。
-    _instance_mutex = kernel32.CreateMutexW(None, False, "Local\\DianGeTai_SingleInstance_v1")
+    # v1.2.5：名字收敛到 state.APP_MUTEX_NAME——安装包 点歌台.iss 的 AppMutex
+    # 用的就是这个字符串，两边必须逐字一致。
+    _instance_mutex = kernel32.CreateMutexW(None, False, state.APP_MUTEX_NAME)
     if not _instance_mutex:
         return True   # 创建失败（如无权限建 Global）→ 放行，宁多不少
     if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:

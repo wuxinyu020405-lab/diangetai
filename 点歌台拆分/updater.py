@@ -82,10 +82,14 @@ def pick_portable_asset(assets, tag):
     return zips[0]
 
 
-def _sha256_of(path, block=1024 * 1024):
+def _sha256_of(path, block=1024 * 1024, cancelled=None):
+    """算文件 SHA256。cancelled（threading.Event）置位时抛 _Cancelled 提前退出，
+    免得用户点了取消还要等整包校验完（128MB 校验十几秒）。"""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:
+            if cancelled is not None and cancelled.is_set():
+                raise _Cancelled()
             b = f.read(block)
             if not b:
                 break
@@ -93,22 +97,59 @@ def _sha256_of(path, block=1024 * 1024):
     return h.hexdigest()
 
 
-class _ProgressDialog:
-    """极简进度窗（tkinter，无 CTk）。任何创建失败都退回纯日志，绝不拦更新流程。"""
+class _Cancelled(Exception):
+    """用户主动取消更新下载的内部信号（不是错误，不弹任何提示）。"""
 
-    def __init__(self, app, title):
+
+class _ProgressDialog:
+    """极简进度窗（tkinter，无 CTk）。任何创建失败都退回纯日志，绝不拦更新流程。
+
+    v1.2.5 需求"下载窗口可控"：
+    - 有「取消」按钮；点窗口 X 与点取消**完全等价**；
+    - 取消只置位 self.cancelled，真正的收尾（中断读流 → 删 .part → 关窗）
+      由下载线程的 finally 统一做，所以任何异常路径都不会留下残窗；
+    - 取消后立刻显示"正在取消…"，不会看起来像点了没反应。
+    """
+
+    def __init__(self, app, title, on_cancel=None):
         self.app = app
         self.win = None
         self.lbl = None
         self.bar = None
+        self.btn = None
+        self.cancelled = threading.Event()   # 下载/解压/校验循环逐块检查
+        self._closing = False
         try:
             import tkinter as tk
             from tkinter import ttk
 
+            def _request_cancel():
+                """取消 / 点 X：置位标志 + 按钮禁用防重复点，然后交给下载线程收尾。
+                这里**不** destroy 窗口——窗口留着显示"正在取消"，由下载线程
+                finally 里的 close() 真正销毁，确保任何路径窗口都必然消失。"""
+                if self.cancelled.is_set():
+                    return
+                self.cancelled.set()
+                try:
+                    self.btn.configure(state="disabled", text="正在取消…")
+                except Exception:
+                    pass
+                try:
+                    self.lbl.configure(text="正在中断下载并清理残留…")
+                except Exception:
+                    pass
+                if callable(on_cancel):
+                    try:
+                        on_cancel()
+                    except Exception:
+                        pass
+
             def _mk():
+                if self._closing:
+                    return
                 w = tk.Toplevel(app.root)
                 w.title(title)
-                w.geometry("360x110")
+                w.geometry("360x146")
                 w.resizable(False, False)
                 w.attributes("-topmost", True)
                 tk.Label(w, text=title, font=("Microsoft YaHei", 10, "bold")).pack(pady=(12, 4))
@@ -116,13 +157,17 @@ class _ProgressDialog:
                 bar.pack(pady=2)
                 lbl = tk.Label(w, text="准备中…", font=("Microsoft YaHei", 9))
                 lbl.pack()
-                w.protocol("WM_DELETE_WINDOW", lambda: None)   # 下载中不给关
-                self.win, self.bar, self.lbl = w, bar, lbl
+                btn = tk.Button(w, text="取消", width=10, command=_request_cancel)
+                btn.pack(pady=(6, 8))
+                w.protocol("WM_DELETE_WINDOW", _request_cancel)   # v1.2.5：X = 取消
+                self.win, self.bar, self.lbl, self.btn = w, bar, lbl, btn
             app.root.after(0, _mk)
         except Exception:
             pass
 
     def set(self, pct, text):
+        if self.cancelled.is_set():
+            return    # 取消后不再刷新进度，把"正在取消…"的文案留着
         try:
             if self.bar is not None:
                 self.app.root.after(0, lambda: (self.bar.configure(value=pct),
@@ -131,11 +176,25 @@ class _ProgressDialog:
             pass
 
     def close(self):
+        """幂等关窗。调用点覆盖：成功、失败、取消、解压失败、校验失败、体积不符。"""
+        if self._closing:
+            return
+        self._closing = True
         try:
-            if self.win is not None:
-                self.app.root.after(0, self.win.destroy)
+            if self.win is None:
+                return      # _mk 还没跑/创建失败 → 它自己看到 _closing 就不建了
+            self.app.root.after(0, self._destroy)
         except Exception:
             pass
+
+    def _destroy(self):
+        try:
+            if self.win is not None:
+                self.win.destroy()
+        except Exception:
+            pass
+        finally:
+            self.win = None
 
 
 # ════════════════ ps1 生成与 spawn（v1.2.3 核心）════════════════════════
@@ -333,8 +392,13 @@ def spawn_ps_worker(base, plan):
     return ps1
 
 
-def extract_zip(zip_path, staging, log=None):
-    """解压便携 zip 到 staging（剥掉 zip 根目录名），返回文件数。zip-slip 防呆。"""
+def extract_zip(zip_path, staging, log=None, cancelled=None):
+    """解压便携 zip 到 staging（剥掉 zip 根目录名），返回文件数。zip-slip 防呆。
+
+    v1.2.5：cancelled 置位时抛 _Cancelled 提前中止（解压 7000+ 文件要几秒，
+    用户点了取消不该再等），staging 半成品由调用方统一清掉。"""
+    if cancelled is not None and cancelled.is_set():
+        raise _Cancelled()
     shutil.rmtree(staging, ignore_errors=True)
     os.makedirs(staging, exist_ok=True)
     n = 0
@@ -346,6 +410,8 @@ def extract_zip(zip_path, staging, log=None):
         roots = {i.filename.split("/")[0] for i in names if "/" in i.filename}
         prefix = (list(roots)[0] + "/") if len(roots) == 1 else ""
         for info in names:
+            if cancelled is not None and cancelled.is_set():
+                raise _Cancelled()
             rel = info.filename[len(prefix):] if prefix else info.filename
             if not rel:
                 continue
@@ -411,6 +477,8 @@ def download_and_apply(app, tag, asset, html_url):
     def _worker():
         try:
             _do_download(app, tag, asset, html_url)
+        except _Cancelled:
+            pass            # v1.2.5：用户主动取消，不是失败，不弹任何提示
         except Exception as e:
             try:
                 app.log(f"❌ 自动更新失败：{e}（可改用手动下载）")
@@ -445,6 +513,174 @@ def _rm(path):
         pass
 
 
+# ═════════ v1.2.5：下载加速 · 断点续传 · 重试（需求①）═════════
+# 旧实现是"单连接、从头写到尾、失败即整包重下、只有 30s socket 读超时"，
+# 边下边吐字节时永远不会超时 → 用户实测"特别慢、基本下载不成功"。
+# 现在：能分段就 8 连接并发分段下发（每段独立 seek 写自己的区间，互不覆盖）；
+#      中断后按各段已完成位置续传，不再从 0 开始；限次退避重试 + 整体时限兜底。
+_SEG_MIN_SIZE = 4 * 1024 * 1024      # < 4MB 不分段：连接开销大于收益
+_SEG_MAX = 8                          # 最多 8 个并发连接
+_DL_TOTAL_TIMEOUT = 900               # 整体截止（秒），慢速吐字节也不会无限挂着
+_DL_ATTEMPTS = 3                      # 最多尝试次数（含首轮）
+_DL_CHUNK = 256 * 1024
+_UA = "DianGeTai-Updater"
+
+
+def _open_range(url, start=None, end=None, timeout=30):
+    """打开 URL。给 start 时带 Range 头（end 为 None 表示"从 start 到末尾"）。"""
+    headers = {"User-Agent": _UA, "Accept": "*/*"}
+    if start is not None:
+        headers["Range"] = "bytes=%d-%s" % (start, "" if end is None else end)
+    return urllib.request.urlopen(
+        urllib.request.Request(url, headers=headers), timeout=timeout)
+
+
+def _probe_segments(url, total):
+    """探测服务端是否支持 Range，返回分段数（1 = 不支持或包太小）。"""
+    if not total or total < _SEG_MIN_SIZE:
+        return 1
+    try:
+        with _open_range(url, 0, 0) as r:
+            ok = getattr(r, "status", None) == 206
+    except Exception:
+        return 1
+    if not ok:
+        return 1
+    return max(1, min(_SEG_MAX, total // _SEG_MIN_SIZE))
+
+
+def _download_file(url, dest, total, dlg):
+    """下载到 dest：分段并发 + 断点续传 + 重试 + 整体时限。
+
+    取消（dlg.cancelled 置位）时抛 _Cancelled，并把 .part 残留清掉。
+    成功后 dest 是完整文件，.part 消失。
+    """
+    part = dest + ".part"
+    cancelled = dlg.cancelled
+    deadline = time.time() + _DL_TOTAL_TIMEOUT
+
+    # 上次已下满：直接归位
+    if total and os.path.exists(part) and os.path.getsize(part) == total:
+        os.replace(part, dest)
+        return total
+
+    nseg = _probe_segments(url, total)
+    segs = []          # [[start, end_or_None], ...]
+    if nseg > 1:
+        step = total // nseg
+        for i in range(nseg):
+            s = i * step
+            e = total - 1 if i == nseg - 1 else (i + 1) * step - 1
+            segs.append([s, e])
+        # 分段写需要固定长度文件，各段才能独立 seek
+        with open(part, "ab") as f:
+            f.truncate(total)
+        done = [s - 1 for s, _ in segs]        # s-1 = 该段尚未开始
+    else:
+        # 单线程：支持从已有 .part 续传（.part 比目标小就是上次中断留下的）
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        if not total:
+            have = 0                            # 总长未知时不能续
+        if have > total:
+            have = 0
+        if have:
+            # 续传前必须确认服务端真的认 Range：有些源直接忽略 Range 返回 200 全量，
+            # 那样从 have 往后写会把整包写错位 —— 宁可从 0 重下。
+            try:
+                with _open_range(url, 0, 0) as h:
+                    if getattr(h, "status", None) != 206:
+                        have = 0
+            except Exception:
+                have = 0
+            if not have:
+                _rm(part)
+        if not os.path.exists(part):
+            open(part, "ab").close()            # r+b 要求文件先存在
+        segs.append([have, (total - 1) if total else None])
+        done = [have - 1]
+
+    lock = threading.Lock()
+    errs = []
+
+    def _run_seg(idx):
+        start, end = segs[idx]
+        try:
+            if end is not None and start > end:
+                return
+            r = _open_range(url, start if start else 0, end)
+            if start and getattr(r, "status", None) != 206:
+                # 服务端无视 Range、回了 200 全量 → 必须从 0 写，否则整包错位
+                start = 0
+                with lock:
+                    done[idx] = -1
+            with r, open(part, "r+b", buffering=0) as f:
+                f.seek(start)
+                pos = start
+                while True:
+                    if cancelled.is_set():
+                        raise _Cancelled()
+                    if time.time() > deadline:
+                        raise RuntimeError("下载超时（整体时限）")
+                    want = _DL_CHUNK if end is None else min(_DL_CHUNK, end - pos + 1)
+                    if want <= 0:
+                        break
+                    b = r.read(want)
+                    if not b:
+                        break
+                    f.write(b)
+                    pos += len(b)
+                    with lock:
+                        done[idx] = pos - 1
+        except _Cancelled:
+            raise
+        except Exception as e:            # 交给主循环决定是否重试
+            errs.append(e)
+
+    def _got():
+        with lock:
+            return sum(max(0, d - s + 1) for (s, _), d in zip(segs, done))
+
+    for attempt in range(1, _DL_ATTEMPTS + 1):
+        errs.clear()
+        threads = [threading.Thread(target=_run_seg, args=(i,), daemon=True)
+                   for i in range(len(segs))]
+        for t in threads:
+            t.start()
+        while any(t.is_alive() for t in threads):
+            if cancelled.is_set():
+                break
+            got = _got()
+            pct = int(got * 100 / total) if total else 0
+            dlg.set(pct, "%d / %d MB（%d%%）%s" % (
+                got // 1024 // 1024, (total or 0) // 1024 // 1024, pct,
+                ("· 第%d次重试" % attempt) if attempt > 1 else ""))
+            if time.time() > deadline:
+                errs.append(RuntimeError("下载超时（整体时限）"))
+                break
+            time.sleep(0.3)
+        for t in threads:
+            t.join(timeout=5)
+
+        if cancelled.is_set():
+            _rm(part)
+            raise _Cancelled()
+
+        finished = all((e is not None and d >= e) for (_, e), d in zip(segs, done))
+        if finished:
+            break
+        if attempt < _DL_ATTEMPTS:
+            time.sleep(2 * attempt)     # 退避 2s / 4s
+
+    got = _got()
+    if total and got < total:
+        why = errs[-1] if errs else "连接异常"
+        _rm(part)
+        raise RuntimeError("下载中断（已下载 %d/%d MB，原因：%s）"
+                           % (got // 1024 // 1024, total // 1024 // 1024, why))
+    os.replace(part, dest)
+    return os.path.getsize(dest)
+
+
 def _do_download(app, tag, asset, html_url):
     name = "dgt_update.zip"   # 固定文件名：不用资产名，杜绝奇怪字符进路径/脚本
     url = asset.get("browser_download_url")
@@ -459,55 +695,45 @@ def _do_download(app, tag, asset, html_url):
     zip_path = os.path.join(dl_dir, name)
     staging = os.path.join(base, "_update_staging")
 
-    dlg = _ProgressDialog(app, f"正在下载 {tag}")
+    dlg = _ProgressDialog(app, f"正在下载 {tag}",
+                          on_cancel=lambda: app.log("⏹ 已请求取消更新下载"))
     app.log(f"⬇️ 开始下载新版（约 {size/1024/1024:.0f} MB）…")
-    req = urllib.request.Request(url, headers={"User-Agent": "DianGeTai-Updater"})
     t0 = time.time()
-    last_pct = -10
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp, open(zip_path, "wb") as out:
-            total = int(resp.headers.get("Content-Length") or 0) or size
-            got = 0
-            while True:
-                chunk = resp.read(256 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
-                got += len(chunk)
-                pct = int(got * 100 / total) if total else 0
-                if pct - last_pct >= 5:
-                    last_pct = pct
-                    dlg.set(pct, f"{got/1024/1024:.0f} / {total/1024/1024:.0f} MB（{pct}%）")
-    except Exception:
-        dlg.close()
+        _download_file(url, zip_path, size, dlg)
+
+        # 校验：大小 + SHA256
+        actual = os.path.getsize(zip_path)
+        if size and actual != size:
+            _rm(zip_path)
+            raise RuntimeError(f"下载包大小不符（期望 {size}，实际 {actual}），已丢弃")
+        if digest:
+            dlg.set(100, "校验 SHA256…（约十几秒）")
+            app.log("校验 SHA256…")
+            if _sha256_of(zip_path, cancelled=dlg.cancelled) != digest:
+                _rm(zip_path)
+                raise RuntimeError("SHA256 校验失败（包可能被劫持或损坏），已丢弃")
+        app.log(f"✅ 下载校验通过（{time.time()-t0:.0f}s）")
+
+        # 解压 + 包内版本核对（主程序退出前做完；ps1 只负责换文件，停机时间最短）
+        dlg.set(100, "解压中…")
+        n = extract_zip(zip_path, staging, log=app.log, cancelled=dlg.cancelled)
+        if not _staging_version_ok(staging, tag):
+            shutil.rmtree(staging, ignore_errors=True)
+            _rm(zip_path)
+            raise RuntimeError("包内版本号与目标不符，已丢弃（防错包）")
+        _rm(zip_path)      # staging 就绪，zip 使命完成，省 128MB
+        dlg.set(100, f"就绪：{n} 个文件已解压")
+        app.log(f"✅ 解压完成（{n} 个文件），等待你确认重启")
+        time.sleep(0.4)
+    except _Cancelled:
+        # 用户主动取消：不弹任何提示，清干净残留，保持现有版本可用
         _rm(zip_path)
-        raise RuntimeError("下载中断")
-
-    # 校验：大小 + SHA256
-    actual = os.path.getsize(zip_path)
-    if size and actual != size:
-        dlg.close(); _rm(zip_path)
-        raise RuntimeError(f"下载包大小不符（期望 {size}，实际 {actual}），已丢弃")
-    if digest:
-        dlg.set(100, "校验 SHA256…（约十几秒）")
-        app.log("校验 SHA256…")
-        if _sha256_of(zip_path) != digest:
-            dlg.close(); _rm(zip_path)
-            raise RuntimeError("SHA256 校验失败（包可能被劫持或损坏），已丢弃")
-    app.log(f"✅ 下载校验通过（{time.time()-t0:.0f}s）")
-
-    # 解压 + 包内版本核对（主程序退出前做完；ps1 只负责换文件，停机时间最短）
-    dlg.set(100, "解压中…")
-    n = extract_zip(zip_path, staging, log=app.log)
-    if not _staging_version_ok(staging, tag):
-        dlg.close()
-        shutil.rmtree(staging, ignore_errors=True); _rm(zip_path)
-        raise RuntimeError("包内版本号与目标不符，已丢弃（防错包）")
-    _rm(zip_path)      # staging 就绪，zip 使命完成，省 128MB
-    dlg.set(100, f"就绪：{n} 个文件已解压")
-    app.log(f"✅ 解压完成（{n} 个文件），等待你确认重启")
-    time.sleep(0.4)
-    dlg.close()
+        shutil.rmtree(staging, ignore_errors=True)
+        app.log("⏹ 更新已取消（现有版本未做任何改动）")
+        return
+    finally:
+        dlg.close()        # 幂等：成功/失败/取消/超时任何路径窗口都必然关闭
 
     # 写 marker（选"稍后"时它保证下次启动自动完成更新；立即模式确认时再改写）
     marker = os.path.join(base, "_update_pending.json")

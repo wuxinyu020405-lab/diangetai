@@ -1,12 +1,12 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """版本单一来源。
 
 发版流程：改这里 → 提交 → 打 tag `v{VERSION}` → CI 用同一份版本号打包发布。
 exe 版本资源（spec）、GUI 标题、自检报告、更新比对全部读这里。
 """
 
-VERSION = "1.2.4"                      # 语义化版本，无 v 前缀
-VERSION_TUPLE = (1, 2, 4, 0)           # exe 版本资源用（四段）
+VERSION = "1.2.6"                      # 语义化版本，无 v 前缀
+VERSION_TUPLE = (1, 2, 6, 0)           # exe 版本资源用（四段）
 PRERELEASE = ""                        # 正式版留空；测试版如 "-beta.1"
 
 DISPLAY = "v" + VERSION + PRERELEASE   # GUI / 日志用

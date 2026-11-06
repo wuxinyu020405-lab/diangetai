@@ -340,11 +340,17 @@ def _bilibili_auto_login_worker(app_instance):
     if room_id:
         app_instance.log(f"✅ 自动获取直播间号成功：{room_id}")
         result_message = (f"B站 Cookie 和直播间号均已保存。\n直播间号：{room_id}\n\n"
-                          f"请关闭并重新打开软件以应用配置。")
+                          f"发弹幕已自动生效，无需重启。\n"
+                          f"若弹幕监听未连上，重启一次程序即可。")
     else:
         app_instance.log("❌ 未能自动获取直播间号，请在「账号登录」页的房间号输入框手动填写。")
         result_message = "Cookie 已保存，但未能自动获取直播间号。\n请在「账号登录」页的房间号框手动填写后重启。"
 
+    # v1.2.6：登录后立刻把新 Cookie 热灌进弹幕发送器（原来只在启动时读一次，导致登录了也发不出）
+    try:
+        app_instance.root.after(0, lambda: app_instance.reload_bili_sender())
+    except Exception:
+        pass
     app_instance.root.after(0, lambda: app_instance.update_account_status())
     app_instance.root.after(0, lambda msg=result_message: messagebox.showinfo("B站登录结果", msg))
 

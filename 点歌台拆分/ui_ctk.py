@@ -144,15 +144,17 @@ def build(app, root):
                           f"http://127.0.0.1:{state.overlay_port}{p}")).pack(side="left", padx=3)
 
     # ── 标签页（标准 CTkTabview，不做自定义切换优化）──
-    name_log = "运行日志"
-    name_acct = "账号登录"
-    name_queue_page = "队列管理"
-    name_basic = "音质缓存"
-    name_mix = "综合挂件"
-    name_lyric = "纯歌词"
-    name_play = "正在播放"
-    name_queue = "点歌列表"
-    PAGE_NAMES = [name_log, name_acct, name_queue_page, name_basic, name_mix, name_lyric, name_play, name_queue]
+    # v1.2.6：标签页从 8 个增至 9 个，长名在 894px 宽下会被裁切，统一收短（快捷按钮文字不受影响）
+    name_log = "日志"
+    name_acct = "账号"
+    name_dmai = "弹幕/AI"
+    name_queue_page = "队列"
+    name_basic = "音质"
+    name_mix = "挂件"
+    name_lyric = "歌词"
+    name_play = "播放"
+    name_queue = "点歌"
+    PAGE_NAMES = [name_log, name_acct, name_dmai, name_queue_page, name_basic, name_mix, name_lyric, name_play, name_queue]
 
     tabs = ctk.CTkTabview(
         root,
@@ -168,6 +170,16 @@ def build(app, root):
     tabs.pack(fill="both", expand=True, padx=12, pady=(10, 6))
     for n in PAGE_NAMES:
         tabs.add(n)
+
+    # v1.2.6：9 个标签时 CTkTabview 会按文字自适应宽度导致右侧标签溢出被裁，
+    # 关掉 dynamic_resizing 让按钮在容器内均分，9 个都能看见。
+    try:
+        _seg = tabs._segmented_button
+        _seg._dynamic_resizing = False
+        _seg.configure(font=_font(11))
+        _seg.configure(width=880)
+    except Exception:
+        pass
 
     pages = {n: tabs.tab(n) for n in PAGE_NAMES}
 
@@ -254,45 +266,97 @@ def build(app, root):
                   fg_color=("#64748B", "#475569"), font=_font(12),
                   command=app.update_account_status).pack(anchor="w")
 
-    # ══════════════════ 发弹幕（v1.2.4：主播手动通过本程序发 B站弹幕）══════════════════
-    b = _section(acct_sc, "发弹幕", "以你的账号在 B站直播间发一条；每分钟最多 3 条")
-    h = _row(b, "内容")
-    app.entry_send_dm = ctk.CTkEntry(h, width=330, font=_font(12),
-                                     placeholder_text="输入弹幕内容（最多 40 字）")
+    # ══════════════════ 弹幕与 AI（v1.2.6 独立设置页）══════════════════
+    dmai_page = pages[name_dmai]
+    dmai_sc = scroller(dmai_page)
+
+    b = _section(dmai_sc, "B站弹幕发送", "用你的账号在直播间发言；登录后立即生效，无需重启")
+    app.lbl_dm_status = ctk.CTkLabel(b, text="⏳ 检测中...", font=_font(12), anchor="w")
+    app.lbl_dm_status.pack(anchor="w", pady=(0, 8))
+    hbar = ctk.CTkFrame(b, fg_color="transparent")
+    hbar.pack(fill="x", pady=(0, 8))
+    ctk.CTkButton(hbar, text="🔄 刷新发送器", width=120, height=28, corner_radius=8,
+                  fg_color=("#64748B", "#475569"), font=_font(11),
+                  command=app.reload_bili_sender).pack(side="left")
+    ctk.CTkButton(hbar, text="🧪 测试发送", width=110, height=28, corner_radius=8,
+                  fg_color=WARN, hover_color="#D97706", font=_font(11),
+                  command=app.test_send_danmaku).pack(side="left", padx=(8, 0))
+
+    h = _row(b, "启用发弹幕", "关闭后不再自动回复/发送")
+    app.sw_dm_enabled = ctk.CTkSwitch(h, text="", width=44, font=_font(11),
+                                      command=app.update_danmaku_settings)
+    if app.config.get("danmaku_send_enabled", True):
+        app.sw_dm_enabled.select()
+    app.sw_dm_enabled.pack(side="left")
+
+    h = _row(b, "每分钟上限", "条/分钟，风控紧时别调高")
+    app.entry_dm_per_min = ctk.CTkEntry(h, width=80, font=_font(12))
+    app.entry_dm_per_min.insert(0, str(app.config.get("danmaku_sends_per_min", 3)))
+    app.entry_dm_per_min.pack(side="left")
+    live_entry(app.entry_dm_per_min, lambda v: app.update_danmaku_settings())
+
+    h = _row(b, "最小间隔", "秒，两条之间至少隔多久")
+    app.entry_dm_gap_sec = ctk.CTkEntry(h, width=80, font=_font(12))
+    app.entry_dm_gap_sec.insert(0, str(app.config.get("danmaku_min_gap_sec", 3)))
+    app.entry_dm_gap_sec.pack(side="left")
+    live_entry(app.entry_dm_gap_sec, lambda v: app.update_danmaku_settings())
+
+    h = _row(b, "手动发送")
+    app.entry_send_dm = ctk.CTkEntry(h, width=300, font=_font(12), placeholder_text="输入弹幕内容（最多 40 字）")
     app.entry_send_dm.pack(side="left")
     app.btn_send_dm = ctk.CTkButton(h, text="发送", width=64, height=28, corner_radius=8,
                                     font=_font(11, True), fg_color=ACCENT,
                                     command=app.gui_send_danmaku)
     app.btn_send_dm.pack(side="left", padx=(6, 0))
-    # 回车即发送（与输入框绑定，不必点按钮）
     app.entry_send_dm.bind("<Return>", lambda _e: app.gui_send_danmaku())
     app.lbl_send_dm_result = ctk.CTkLabel(b, text="", font=_font(11), anchor="w")
     app.lbl_send_dm_result.pack(anchor="w", pady=(4, 0))
 
-    # ══════════════════ 本机 AI 接口（v1.2.4）══════════════════
-    b = _section(acct_sc, "本机 AI 接口", "给 AI/脚本读写本机；仅 127.0.0.1，必须带 token")
+    def _poll_dm_status():
+        try:
+            s = getattr(app, "danmaku_sender", None)
+            if s is None:
+                app.lbl_dm_status.configure(text="⚪ 发送器未初始化", text_color=MUTED)
+            elif not getattr(s, "enabled", True):
+                app.lbl_dm_status.configure(text="⚪ 已关闭发弹幕", text_color=MUTED)
+            elif s.ready():
+                app.lbl_dm_status.configure(
+                    text="🟢 可发送（房间 %s · %s 条/分钟 · 间隔 %ss）" % (
+                        s.room_id, s.sends_per_min, int(s.min_gap_sec)),
+                    text_color="#22C55E")
+            else:
+                app.lbl_dm_status.configure(
+                    text="🔴 未登录或 Cookie 缺 bili_jct —— 请先「重新登录 B站」", text_color="#EF4444")
+        except Exception:
+            pass
+        root.after(3000, _poll_dm_status)
+    root.after(1200, _poll_dm_status)
+
+    # ── 本机 AI 接口 ──
+    b = _section(dmai_sc, "本机 AI 接口", "给 AI/脚本读写本机；仅 127.0.0.1，必须带 token")
     h = _row(b, "API Token")
-    app.entry_api_token = ctk.CTkEntry(h, width=330, font=_font(12),
-                                       placeholder_text="留空=接口关闭；填任意字符串=启用")
+    app.entry_api_token = ctk.CTkEntry(h, width=300, font=_font(12), placeholder_text="留空=接口关闭；填任意字符串=启用")
     app.entry_api_token.insert(0, str(app.config.get("api_token", "") or ""))
     app.entry_api_token.pack(side="left")
-    live_entry(app.entry_api_token, lambda v: (app.config.__setitem__("api_token", v.strip()),
-                                               app.schedule_save_style()))
+    live_entry(app.entry_api_token, lambda v: (app.config.__setitem__("api_token", v.strip()), app.schedule_save_style()))
+    ctk.CTkButton(h, text="随机生成", width=80, height=28, corner_radius=8,
+                  fg_color=("#64748B", "#475569"), font=_font(11),
+                  command=app.gen_api_token).pack(side="left", padx=(8, 0))
     app.lbl_api_hint = ctk.CTkLabel(
-        b, text=f"改完需重启生效。接口地址：http://127.0.0.1:{{端口}}/api/state?token=你的token\n"
-               "可用：/api/state /api/danmaku /api/queue（读） · /api/send /api/queue/add"
-               " /api/queue/remove /api/queue/move /api/skip /api/pause（写）",
+        b,
+        text=f"改完需重启生效。接口地址：http://127.0.0.1:{{端口}}/api/state?token=你的token\n"
+             f"读取：/api/state /api/danmaku /api/queue\n"
+             f"写入：/api/send /api/queue/add /api/queue/remove /api/queue/move /api/skip /api/pause",
         font=_font(10), text_color=MUTED, anchor="w", justify="left")
     app.lbl_api_hint.pack(anchor="w", pady=(6, 0))
 
-    h = _row(b, "弹幕历史条数")
-    app.entry_dm_hist = ctk.CTkEntry(h, width=90, font=_font(12),
-                                     placeholder_text="200")
+    h = _row(b, "弹幕历史条数", "供 AI 读最近弹幕；0=不记录")
+    app.entry_dm_hist = ctk.CTkEntry(h, width=90, font=_font(12), placeholder_text="200")
     app.entry_dm_hist.insert(0, str(app.config.get("danmaku_history_size", 200)))
     app.entry_dm_hist.pack(side="left")
     live_entry(app.entry_dm_hist, app._on_history_size_change)
-    ctk.CTkLabel(h, text="0=不记录；改完需重启生效", font=_font(10),
-                 text_color=MUTED).pack(side="left", padx=(8, 0))
+    ctk.CTkLabel(h, text="改完需重启生效", font=_font(10), text_color=MUTED).pack(side="left", padx=(8, 0))
+
 
     # ══════════════════ 队列管理（v1.2.2：查看/删除 排队·就绪点歌）══════════════════
     qm_page = pages[name_queue_page]

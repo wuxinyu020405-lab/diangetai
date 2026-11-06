@@ -3,6 +3,17 @@
 """
 
 
+# ===== v1.2.5：单实例互斥体 + 外部"优雅退出"通道 =====
+# 两个都是 Windows 命名内核对象，**必须与 点歌台.iss 里的
+# AppMutex / QuitEventName 逐字一致**，否则安装器认不出、也通知不到运行中的实例。
+#   APP_MUTEX_NAME：单实例锁（main._acquire_single_instance 创建；进程活着就一直在，
+#                   安装器靠它判断"点歌台是否还在跑"）
+#   QUIT_EVENT_NAME：外部退出事件（mainapp._start_quit_watcher 监听；安装包覆盖
+#                   升级时置位 → 程序走 quit_app 落盘后自行退出，不做强杀）
+APP_MUTEX_NAME = "Local\\DianGeTai_SingleInstance_v1"
+QUIT_EVENT_NAME = "Local\\DianGeTai_Quit_v1"
+
+
 # ================= 全局状态 =================
 playlist = []        # 就绪队列：只含"缓存命中或下载成功"的歌（需求1）
 
