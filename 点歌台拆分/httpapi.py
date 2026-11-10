@@ -27,8 +27,11 @@
 """
 
 import asyncio
+import base64
 import copy
 import json
+import os
+import re
 import time
 
 from aiohttp import web
@@ -57,6 +60,50 @@ _DENIED_KEYS = (
 
 _STYLE_SECTIONS = ("mixed", "lyric", "playing", "queue", "global")
 _STYLE_SCALARS = ("audio_quality", "max_cache_files", "max_cache_size_mb")
+
+# ── v1.2.9：本地曲库写入边界（方案 A：只允许 AI 上传音频内容）──────
+# 只往 LOCAL_SONGS_DIR 这一个目录写；扩展名白名单；单文件上限；重名不覆盖；
+# 写完立刻校验是不是真能播，不能播就删掉。绝不接受"源路径"(那是读任意路径)。
+LOCAL_ALLOWED_EXTS = (".mp3", ".wav", ".flac", ".ogg")
+LOCAL_MAX_BYTES = 200 * 1024 * 1024          # 单首上限 200MB
+LOCAL_MIN_BYTES = 100 * 1024                  # 与 locallib.MIN_BYTES 一致
+
+
+def _local_dir():
+    """当前生效的本地曲库目录（跟 mainapp.get_local_songs_dir 同一口径）。"""
+    app = state.app
+    cfg = getattr(app, "config", {}) if app is not None else {}
+    folder = (cfg.get("local_songs_dir") or settings.LOCAL_SONGS_DIR)
+    if not os.path.isabs(folder):
+        folder = os.path.join(settings.BASE_DIR, folder)
+    return folder
+
+
+def _safe_song_name(raw):
+    """把用户/AI 给的名字清洗成安全的文件名主干。返回 (name, 错误)。
+
+    严格：只保留文字、数字、空格与少量安全符号，绝不带路径分隔符；
+    挡掉 '..'、控制字符、Windows 保留名、首尾点空格。
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return "", "缺少歌名"
+    # 去掉扩展名（如果传了）
+    base, ext = os.path.splitext(s)
+    if ext.lower() in LOCAL_ALLOWED_EXTS:
+        s = base
+    # 只留安全字符：中英文、数字、空格、- _ ( ) . ' & 、 · 等常见符号
+    safe = re.sub(r'[^\w\u4e00-\u9fff \-_().\'&·、,，]', "", s, flags=re.UNICODE)
+    safe = safe.strip(" .")               # 去首尾点与空格（Windows 不允许结尾点）
+    if not safe:
+        return "", "歌名里没有可用字符"
+    if safe.upper() in ("CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4",
+                        "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2",
+                        "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"):
+        return "", "歌名撞上系统保留名"
+    if len(safe) > 120:
+        safe = safe[:120]
+    return safe, ""
 
 
 # ── 日志环形缓冲（不碰 mainapp，运行时挂 log 钩子）─────────────────
@@ -407,6 +454,16 @@ def _settings_apply(body):
             if new is None:
                 ignored.append("%s.%s(值无效)" % (section, key))
                 continue
+            # v1.2.9：字体键做归一。AI 常说中文名（楷体/黑体），归一成英文族名
+            # 跨浏览器更稳；但用户传的是完整字体栈（含逗号）就原样保留，
+            # 不能把它压成单字体，否则会把用户配好的回退链弄丢。
+            if "font" in key and isinstance(new, str) and new.strip() and "," not in new:
+                try:
+                    import fontlib
+                    fam = fontlib.canonical_css_name(new)
+                    new = fontlib.to_css(fam)
+                except Exception:
+                    pass
             if old != new:
                 target[key] = new
                 changed["style_config.%s.%s" % (section, key)] = new
@@ -459,6 +516,32 @@ def _settings_apply(body):
 
 
 # ── 能力自发现 ─────────────────────────────────────────────────────
+def _font_hints():
+    """字体可改的键 + 推荐值，让 AI 别瞎填。
+
+    改字体只需 POST /api/settings，形如：
+      {"style_config": {"lyric": {"font": "'SimHei', sans-serif"}}}
+    中文名会被 fontlib 归一成英文族名（黑体 → SimHei），跨浏览器更稳。
+    """
+    try:
+        import fontlib
+        recommended = [{"css": fontlib.to_css(css_fam), "name": disp,
+                        "available": fontlib.is_available(css_fam)}
+                       for css_fam, disp, _al in fontlib.CURATED_FONTS]
+    except Exception:
+        recommended = []
+    return {
+        "writable_keys": {
+            "mixed": ["font_lyric", "font_playing", "font_queue"],
+            "lyric": ["font"], "playing": ["font"], "queue": ["font"],
+        },
+        "how": "POST /api/settings 传 {\"style_config\":{\"lyric\":{\"font\":\"'SimHei', sans-serif\"}}}",
+        "recommended": recommended,
+        "note": "也可直接填中文字体名（如 楷体），程序会归一成英文族名；"
+                "字体必须装在跑 OBS 的那台电脑上才会生效，本机没装会回落但不报错。",
+    }
+
+
 def _capabilities():
     read = [
         ("GET", "/api/capabilities", "本清单：AI 一调就知道能干啥", {}),
@@ -472,12 +555,20 @@ def _capabilities():
         ("GET", "/api/log", "最近运行日志", {"tail": "1..500，默认 80"}),
         ("GET", "/api/events", "SSE 事件流（state/queue/danmaku/log/play/pause/lyric/settings）",
          {"token": "EventSource 无法设头，用 ?token= 传"}),
+        ("GET", "/api/localsongs", "列出本地曲库（自己录的歌）：名字/大小/能否播", {}),
     ]
     write = [
         ("POST", "/api/send", "发 B站弹幕（继承限频）", {"text": "弹幕内容"}),
         ("POST", "/api/send/test", "同步真发一条测试弹幕并回中文结果", {"text": "可选，默认『点歌台测试弹幕』"}),
         ("POST", "/api/sender/reload", "用最新配置热刷新发弹幕发送器", {}),
-        ("POST", "/api/queue/add", "点歌入队", {"song": "歌名", "user": "点歌人"}),
+        ("POST", "/api/queue/add", "点歌入队",
+         {"song": "歌名", "user": "点歌人",
+          "local_only": "true=只点本地曲库（等价观众发『本地点歌 歌名』），省略=走 QQ 音乐"}),
+        ("POST", "/api/localsongs/upload",
+         "把音频内容上传进本地曲库（只收 base64 内容，不收路径）",
+         {"name": "歌名（不含扩展名）", "ext": "mp3|wav|flac|ogg",
+          "data": "base64 编码的音频字节（≤200MB）"}),
+        ("POST", "/api/localsongs/open", "打开本地曲库文件夹（不改任何文件）", {}),
         ("POST", "/api/queue/remove", "从队列删除", {"zone": "pending|ready", "index": "0 起"}),
         ("POST", "/api/queue/move", "换序/置顶", {"index": "0 起", "to": "0 起", "zone": "pending|ready，默认 ready"}),
         ("POST", "/api/queue/top", "把某项置顶（move 的快捷版）", {"index": "0 起", "zone": "pending|ready"}),
@@ -507,13 +598,18 @@ def _capabilities():
             "style_sections": {s: sorted(allowed.get(s, [])) for s in _STYLE_SECTIONS},
             "style_scalars": list(_STYLE_SCALARS),
         },
+        "fonts": _font_hints(),
         "settings_readonly": list(_CONFIG_READ_KEYS),
         "denied": list(_DENIED_KEYS),
         "security": [
             "只监听 127.0.0.1，外网不可达",
             "每个请求校验 token，未配置 api_token 时全部端点休眠返 403",
             "凭据(B站Cookie/QQ musickey)/文件路径/api_token 永不通过接口读写；房间号只读不可改；敏感字段传入会明确回执『拒不处理』",
-            "不提供文件增删、退出程序、扫码登录能力",
+            "不提供退出程序、扫码登录、删除文件的能力",
+            ("本地曲库上传只允许写入曲库目录本身；扩展名限 " +
+             "/".join(LOCAL_ALLOWED_EXTS) +
+             "；单首 ≤%dMB；" % (LOCAL_MAX_BYTES // 1048576) +
+             "重名自动加序号不覆盖；落盘后校验不是音频即删；绝不接受『源路径』参数（那等于开放整块硬盘）"),
             "弹幕采集与指令解析逻辑不经过本接口，不受影响",
         ],
     }
@@ -821,8 +917,16 @@ async def handle_queue_add(request):
     user = str(body.get("user") or "AI").strip()[:30]
     if not song:
         return _err("缺少 song")
-    state.pending_requests.append({"song_name": song, "uname": user,
-                                   "platform": "api", "ts": time.time()})
+    # v1.2.9：local_only=true 时走本地曲库（等价于观众发「本地点歌 歌名」）
+    local_only = bool(body.get("local_only"))
+    req = {"song_name": song, "uname": user,
+           "platform": "api", "ts": time.time()}
+    if local_only:
+        req["local_only"] = True
+    state.pending_requests.append(req)
+    if local_only:
+        return _ok(song=song, user=user, local_only=True,
+                   note="已入本地曲库点歌队列（只在 my_songs 里找，不回退 QQ 音乐）")
     return _ok(song=song, user=user, note="已入点歌队列，将按顺序下载并播放")
 
 
@@ -871,6 +975,9 @@ async def handle_skip(request):
         return resp
     if not state.skip_event:
         return _err("播放引擎未就绪", 503)
+    # v1.2.9：完全空闲时拒绝切歌，避免 skip_event 残留导致下次点歌被切掉
+    if state.current_song is None and not state.playlist:
+        return _err("当前没有在播的歌，无需切歌", 409)
     state.skip_event.set()
     return _ok(note="已切歌")
 
@@ -1018,6 +1125,140 @@ async def handle_pause_toggle(request):
     return _ok(paused=on)
 
 
+# ── v1.2.9：本地曲库读写（AI 可列出、可上传音频、可打开文件夹）─────
+async def handle_localsongs(request):
+    """列出本地曲库。返回每首歌的名字/大小/能否播，AI 一看就知道有啥。"""
+    ok, resp = _authorized(request)
+    if not ok:
+        return resp
+    try:
+        import locallib
+    except Exception as e:
+        return _err("本地曲库模块不可用：%s" % e, 500)
+    folder = _local_dir()
+    songs = locallib.list_songs(folder)
+    items = []
+    for s in songs:
+        playable, why = locallib.check_playable(s["path"])
+        items.append({"name": s["name"], "ext": s["ext"],
+                      "size": os.path.getsize(s["path"]) if os.path.exists(s["path"]) else 0,
+                      "playable": playable, "why": why})
+    return _ok(folder=folder, count=len(items), items=items,
+               note="观众发『本地点歌 歌名』就可以点到这些歌")
+
+
+async def handle_localsongs_upload(request):
+    """把 AI 传来的音频字节写进本地曲库（方案 A：只收内容，不收路径）。
+
+    请求体：{"name": "夏天", "ext": "mp3", "data": "<base64>"}
+    安全边界：只写 my_songs/；扩展名白名单；单文件 200MB 上限；
+    文件名强制清洗（挡路径分隔符与 ..）；重名不覆盖；
+    落盘后用 check_playable 校验，不是真音频就删掉并报错。
+    """
+    ok, resp = _authorized(request)
+    if not ok:
+        return resp
+    try:
+        import locallib
+    except Exception as e:
+        return _err("本地曲库模块不可用：%s" % e, 500)
+
+    body = await _body(request)
+    if not isinstance(body, dict):
+        return _err("请求体必须是 JSON 对象")
+
+    name, why = _safe_song_name(body.get("name"))
+    if not name:
+        return _err(why or "歌名不合法")
+
+    ext = str(body.get("ext") or "").strip().lower()
+    if not ext.startswith("."):
+        ext = "." + ext if ext else ""
+    if ext not in LOCAL_ALLOWED_EXTS:
+        return _err("只接受 %s，收到 %r" % ("/".join(LOCAL_ALLOWED_EXTS), ext or "(空)"))
+
+    raw_b64 = body.get("data")
+    if not raw_b64 or not isinstance(raw_b64, str):
+        return _err("缺少 data（base64 编码的音频内容）")
+    # 预判大小，避免解码一个超大字符串把内存撑爆
+    approx = len(raw_b64) * 3 // 4
+    if approx > LOCAL_MAX_BYTES:
+        return _err("文件太大（约 %.0fMB），单首上限 %dMB"
+                    % (approx / 1048576, LOCAL_MAX_BYTES // 1048576), 413)
+    try:
+        blob = base64.b64decode(raw_b64, validate=False)
+    except Exception:
+        return _err("data 不是合法的 base64")
+    if len(blob) < LOCAL_MIN_BYTES:
+        return _err("音频太小（%d 字节），至少 %dKB" % (len(blob), LOCAL_MIN_BYTES // 1024))
+    if len(blob) > LOCAL_MAX_BYTES:
+        return _err("文件太大，单首上限 %dMB" % (LOCAL_MAX_BYTES // 1048576), 413)
+
+    folder = _local_dir()
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        return _err("曲库目录不可写：%s" % e, 500)
+
+    # 不覆盖：同名同扩展名已存在就加 (2)/(3)… 后缀
+    target = os.path.join(folder, name + ext)
+    if os.path.exists(target):
+        for i in range(2, 200):
+            cand = os.path.join(folder, "%s(%d)%s" % (name, i, ext))
+            if not os.path.exists(cand):
+                target = cand
+                break
+        else:
+            return _err("同名文件太多，请换个歌名")
+
+    # 双保险：确认最终路径确实落在曲库目录内（防任何拼接绕过）
+    real_folder = os.path.realpath(folder)
+    real_target = os.path.realpath(target)
+    if not real_target.startswith(real_folder + os.sep):
+        return _err("目标路径越界，拒绝写入", 400)
+
+    try:
+        with open(target, "wb") as f:
+            f.write(blob)
+    except OSError as e:
+        return _err("写入失败：%s" % e, 500)
+
+    # 写完立刻校验是不是真音频；不是就删掉，别污染曲库
+    playable, why2 = locallib.check_playable(target)
+    if not playable:
+        try:
+            os.remove(target)
+        except OSError:
+            pass
+        return _err("写入的内容不是可播放的音频（%s），已删除" % (why2 or "无法解码"))
+
+    app = state.app
+    if app is not None:
+        try:
+            app.log("📥 接口上传本地曲库：《%s》（%.1fMB）" % (
+                os.path.splitext(os.path.basename(target))[0], len(blob) / 1048576))
+        except Exception:
+            pass
+    return _ok(file=os.path.basename(target), folder=folder,
+               size=len(blob), playable=True,
+               note="观众发『本地点歌 %s』即可点到" % os.path.splitext(os.path.basename(target))[0])
+
+
+async def handle_localsongs_open(request):
+    """打开本地曲库文件夹（跟 GUI 那个按钮同一动作，不修改任何文件）。"""
+    ok, resp = _authorized(request)
+    if not ok:
+        return resp
+    app = state.app
+    if app is None:
+        return _err("程序未就绪", 503)
+    try:
+        app.open_local_songs_folder()
+    except Exception as e:
+        return _err("打开文件夹失败：%s" % e, 500)
+    return _ok(folder=_local_dir(), note="已在资源管理器中打开")
+
+
 # ── 路由注册 ───────────────────────────────────────────────────────
 def register(web_app):
     """把全部端点挂到 OBS 那个 aiohttp 应用上（同一个端口，省得再开服务）。"""
@@ -1046,3 +1287,7 @@ def register(web_app):
     web_app.router.add_post("/api/sender/reload", handle_sender_reload)
     web_app.router.add_post("/api/send/test", handle_send_test)
     web_app.router.add_post("/api/pause/toggle", handle_pause_toggle)
+    # v1.2.9：本地曲库
+    web_app.router.add_get("/api/localsongs", handle_localsongs)
+    web_app.router.add_post("/api/localsongs/upload", handle_localsongs_upload)
+    web_app.router.add_post("/api/localsongs/open", handle_localsongs_open)

@@ -252,8 +252,19 @@ class MusicApp:
         self.request_pause(not state.pause_event.is_set() if state.pause_event else True)
 
     def request_skip(self):
-        """切歌：复用弹幕同一入口逻辑（Tk 线程 set asyncio.Event）。"""
-        if state.skip_event and not state.skip_event.is_set():
+        """切歌：复用弹幕同一入口逻辑（Tk 线程 set asyncio.Event）。
+
+        v1.2.9 修复：完全空闲时（没在播、队列也空）不接受切歌。
+        原来空闲时点切歌会把 skip_event 置位，而 clear 只在播放循环里做，
+        于是这个意图一直残留 —— 之后点第一首歌，刚开始播就被这里撞掉、
+        表现为「点歌后自动切了一次歌」。
+        """
+        if not state.skip_event:
+            return
+        if state.current_song is None and not state.playlist:
+            self.log("ℹ️ 当前没有在播的歌，忽略切歌")
+            return
+        if not state.skip_event.is_set():
             self.log("⏭️ 切歌！")
             state.skip_event.set()
 
@@ -582,7 +593,13 @@ class MusicApp:
             print(f"[WARN] 设置音量失败: {e}")
         return v
 
-    async def player_load_and_play(self, file_path):
+    async def player_load_and_play(self, file_path, wait_busy_secs=3.0):
+        """起播并确认真的在播。
+
+        v1.2.9 修复：原来固定只等 0.4 秒就查一次 get_busy()，本地录音
+        （尤其大 wav/flac）加载解码慢时会被误判成"文件损坏"，
+        进而触发自动删文件。现在改成轮询等待，最多等 wait_busy_secs。
+        """
         def _pg_start():
             try:
                 pygame.mixer.music.load(file_path)
@@ -597,9 +614,19 @@ class MusicApp:
             except Exception as e:
                 print("pygame 播放异常:", e)
                 return False
-        success = await asyncio.to_thread(_pg_start)
-        await asyncio.sleep(0.4)
-        return pygame.mixer.music.get_busy()
+        started = await asyncio.to_thread(_pg_start)
+        if not started:
+            return False
+        # 轮询确认：只要在等待窗口内任意一次 busy=True 就算成功
+        deadline = time.time() + max(0.4, float(wait_busy_secs))
+        while time.time() < deadline:
+            try:
+                if pygame.mixer.music.get_busy():
+                    return True
+            except Exception:
+                pass
+            await asyncio.sleep(0.15)
+        return False
 
     # ═════════ v1.2.8：本地曲库（GUI 按钮 + 歌词） ═════════
     def get_local_songs_dir(self):
@@ -1407,6 +1434,12 @@ class MusicApp:
             if state.current_song is None and len(state.playlist) > 0:
                 state.current_song = state.playlist.pop(0)
                 requester = state.current_song.get("requester", "神秘观众")
+                # v1.2.9 双保险：新歌开播前先消化掉残留的切歌意图。
+                # 入口（弹幕/按钮/API）已经拦住空闲切歌，这里再兜一层：
+                # 万一还有历史残留，也不能让用户刚点的歌一开口就被切走。
+                if state.skip_event is not None and state.skip_event.is_set():
+                    state.skip_event.clear()
+                    self.log("ℹ️ 已清除残留的切歌意图，本首正常播放")
                 self.log(f"▶️ 准备播放: {state.current_song['display_name']}-{requester}")
                 song_mid = state.current_song.get("mid")
 
@@ -1455,14 +1488,22 @@ class MusicApp:
                         state.active_song_start_ts = time.time()
                         state.active_song_base_pos = 0.0
 
-                        # v1.1·N1：load_and_play 内部起播后 0.4s 才查 busy；若这期间用户已按暂停，
+                        # v1.1·N1：load_and_play 内部起播后确认 busy；若这期间用户已按暂停，
                         # busy=False 属正常而非"文件损坏"——必须排除暂停态，否则会误删缓存文件。
                         if (not started or not self.player_is_busy()) and not state.pause_event.is_set():
-                            self.log(f"⚠️ 播放瞬间结束，可能是文件损坏或解码异常，自动清理并跳过: {real_name}")
-                            try:
-                                if os.path.exists(file_path): os.remove(file_path)
-                            except Exception as e:
-                                print(f"[WARN] 异常已捕获: {e}")
+                            # v1.2.9：本地曲库是用户自己录的资料，**永远不自动删除**。
+                            # 起播失败最多只是"这首没放出来"，绝不能把源文件删掉。
+                            is_local_lib = (state.current_song or {}).get("source") == "local" \
+                                or bool((state.current_song or {}).get("file_path"))
+                            if is_local_lib:
+                                self.log(f"⚠️ 本地文件没能正常起播（可能是加载慢/格式问题），已跳过；"
+                                         f"文件保留未删: {real_name}")
+                            else:
+                                self.log(f"⚠️ 播放瞬间结束，可能是文件损坏或解码异常，自动清理并跳过: {real_name}")
+                                try:
+                                    if os.path.exists(file_path): os.remove(file_path)
+                                except Exception as e:
+                                    print(f"[WARN] 异常已捕获: {e}")
 
                             state.current_song = None; state.active_lrc_lines = []
                             continue
@@ -1470,6 +1511,8 @@ class MusicApp:
                         # v1.1·N1 暂停状态机（实测 SDL：pause 期间 get_pos 冻结、get_busy=False）
                         # 规则：暂停只停当前歌播放；下载/收队列不受影响；切歌优先并自动解除暂停。
                         state.paused = False
+                        busy_false_streak = 0      # v1.2.9：连续 False 计数
+                        _dbg_said = False
                         while True:
                             if state.pause_event.is_set():
                                 if not state.paused:
@@ -1497,15 +1540,43 @@ class MusicApp:
                                 self.update_pause_button()
                             if state.skip_event.is_set():
                                 self.player_stop(); state.skip_event.clear(); break
+
+                            # v1.2.9 修复「点歌后自动切歌」：原来单次 get_busy()==False 就当播完。
+                            # 现在要求**连续 20 次（约 5 秒）都 False** 才认播完。
+                            # 直播时 SMTC 暂停/恢复主播 BGM 会引起音频设备切换，
+                            # 实测会让 get_busy 瞬时变 False，5 秒容忍足以挡住这种抖动。
                             if not self.player_is_busy():
-                                break   # 自然播完，走后面的队列空→恢复 BGM 逻辑
+                                busy_false_streak += 1
+                                if not _dbg_said:
+                                    _dbg_said = True
+                                    try:
+                                        pos = pygame.mixer.music.get_pos()
+                                        init_ok = bool(pygame.mixer.get_init())
+                                    except Exception:
+                                        pos, init_ok = "?", False
+                                    self.log(f"🔍 [诊断] get_busy 首次为 False（pos={pos}ms, "
+                                             f"mixer_init={init_ok}, backend={self.audio_backend}）")
+                                if busy_false_streak >= 20:
+                                    self.log(f"🔍 [诊断] 连续 {busy_false_streak} 次 False（约5秒），判定本首播完")
+                                    break
+                                # 中途恢复过就清掉标记，下次再 False 可再报一次
+                            else:
+                                if busy_false_streak:
+                                    self.log(f"🔍 [诊断] 播放恢复（曾连续 {busy_false_streak} 次 False，已忽略）")
+                                    _dbg_said = False
+                                busy_false_streak = 0
                             await asyncio.sleep(0.25)
                     except Exception as e:
                         self.log(f"❌ 播放失败: {type(e).__name__}: {e}")
-                        try:
-                            if os.path.exists(file_path): os.remove(file_path)
-                        except Exception as e:
-                            print(f"[WARN] 异常已捕获: {e}")
+                        # v1.2.9：本地曲库文件是用户资料，出任何异常都只跳过、不删文件
+                        if not ((state.current_song or {}).get("source") == "local"
+                                or (state.current_song or {}).get("file_path")):
+                            try:
+                                if os.path.exists(file_path): os.remove(file_path)
+                            except Exception as e2:
+                                print(f"[WARN] 异常已捕获: {e2}")
+                        else:
+                            self.log(f"ℹ️ 本地文件保留未删: {real_name}")
 
 
                 state.current_song = None; state.active_lrc_lines = []

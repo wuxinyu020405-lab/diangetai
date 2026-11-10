@@ -58,6 +58,11 @@ def handle_message(app, text, uname, platform="bilibili"):
                                            "ts": _t.time()})
             return
     if text == "切歌":
+        # v1.2.9：完全空闲（没在播、队列也空）时不置位 skip_event。
+        # 否则意图会残留 —— 下次点歌刚开始播就被切掉（用户报的「自动切一次歌」）。
+        if state.current_song is None and not state.playlist:
+            app.log("%sℹ️ 当前没有在播的歌，忽略【切歌】" % tag)
+            return
         if state.skip_event and not state.skip_event.is_set():
             app.log("%s⏭️ 收到【切歌】指令！" % tag)
             app.root.after(0, lambda: state.skip_event.set())

@@ -182,6 +182,17 @@ def check_playable(path):
         import pygame
         if not pygame.mixer.get_init():
             return True, ""            # 播放引擎还没初始化：放行，交给播放器试
+        # v1.2.9 关键修复：**正在播放时绝不能调 music.load()**！
+        # pygame 的 music 模块是单例，load() 会立刻停掉当前正在播的歌，
+        # 导致播放循环里 get_busy() 变 False → 被误判"播完" → 自动切歌。
+        # 这就是「本地点歌之后会自动切一次歌」的真正根因。
+        # 正在播时只用上面的文件头判断（已能挡住改后缀/格式错的文件），
+        # 真正的解码失败交给播放器处理（现在也绝不删本地文件）。
+        try:
+            if pygame.mixer.music.get_busy():
+                return True, ""
+        except Exception:
+            pass
         try:
             pygame.mixer.music.load(path)
         except Exception as e:
