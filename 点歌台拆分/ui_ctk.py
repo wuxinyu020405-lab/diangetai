@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import colorchooser, messagebox
 
 import browserlogin
+import fontlib
 import state
 import settings
 import updater
@@ -216,9 +217,15 @@ def build(app, root):
     b = _section(acct_sc, "B站直播间", "弹幕来源")
     app.lbl_bili_status = ctk.CTkLabel(b, text="⏳ 检测中...", font=_font(12), anchor="w")
     app.lbl_bili_status.pack(anchor="w", pady=(0, 8))
-    ctk.CTkButton(b, text="🔄 重新登录 B站", height=34, corner_radius=8, font=_font(12, True),
+    _bar = ctk.CTkFrame(b, fg_color="transparent")
+    _bar.pack(anchor="w")
+    ctk.CTkButton(_bar, text="🔄 重新登录 B站", height=34, corner_radius=8, font=_font(12, True),
                   fg_color=ACCENT, hover_color=("#1D4ED8", "#60A5FA"),
-                  command=lambda: browserlogin.bilibili_auto_login(app)).pack(anchor="w")
+                  command=lambda: browserlogin.bilibili_auto_login(app)).pack(side="left")
+    # v1.2.8：登录后自动重连弹幕监听；这个按钮是手动兜底，失败时可再点
+    ctk.CTkButton(_bar, text="🔁 重连弹幕", height=34, corner_radius=8, font=_font(12, True),
+                  fg_color=("#64748B", "#475569"), hover_color=("#475569", "#334155"),
+                  command=app.gui_restart_bili_listener).pack(side="left", padx=(8, 0))
 
     # v1.2.1·需求6：config.json 已 DPAPI 加密，不能再手改文件填 room_id，
     # 这里补一个输入框（正常走登录会自动填，这里只作兜底/改号用）
@@ -394,7 +401,7 @@ def build(app, root):
             settings.normalize_quality_key(cfg.get("audio_quality", "flac")), "FLAC 无损品质"))
     app.combo_quality_top = ctk.CTkComboBox(h, values=list(settings.QUALITY_UI_MAP.values()),
                                             width=200, font=_font(12), state="readonly",
-                                            command=lambda v: app.update_audio_quality())
+                                            command=lambda v: app.update_audio_quality(value=v))
     app.combo_quality_top.set(app.var_audio_quality.get())
     app.combo_quality_top.pack(side="left")
 
@@ -415,6 +422,19 @@ def build(app, root):
     ctk.CTkButton(h, text="浏览", width=64, height=28, corner_radius=8,
                   fg_color=("#64748B", "#475569"), font=_font(11),
                   command=app.browse_qq_path).pack(side="left", padx=(8, 0))
+
+    # ═════════ v1.2.8：本地曲库（只加一行按钮 + 说明，不动 9 标签布局）═════════
+    b = _section(basic_sc, "本地曲库（自己录的歌）",
+                 "观众发「本地点歌 歌名」只在这里找相似度最高的一首播放")
+    h = _row(b, "文件夹")
+    ctk.CTkButton(h, text="📂 打开本地曲库文件夹", width=170, height=30, corner_radius=8,
+                  fg_color=ACCENT, font=_font(11, True), text_color="white",
+                  command=app.open_local_songs_folder).pack(side="left")
+    ctk.CTkLabel(b,
+        text="把录好的歌用中文/英文歌名命名（如 我们的夏天.mp3），直接放进这个文件夹；\n"
+             "支持 mp3 / wav / flac / ogg，文件 >100KB，不要建子文件夹。放进去现扫即生效，无需重启。\n"
+             "普通「点歌」仍走 QQ 音乐；只有「本地点歌」才查这里，找不到不会去 QQ 搜。",
+        font=_font(10), text_color=MUTED, anchor="w", justify="left").pack(anchor="w", pady=(6, 0))
 
     b = _section(basic_sc, "缓存清理上限", "超出后按最旧优先删除")
     h = _row(b, "最多保留歌曲数")
@@ -486,10 +506,9 @@ def build(app, root):
     ctk.CTkCheckBox(hz, text="歌词加粗", variable=app.var_mix_bl, font=_font(12),
                     checkbox_width=18, checkbox_height=18, corner_radius=4,
                     command=lambda: app.update_mixed("bold_lyric", app.var_mix_bl.get())).pack(side="left", padx=(0, 16))
-    app.combo_mix_font_lyric = ctk.CTkComboBox(hz, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                          "'Microsoft YaHei', sans-serif"], width=250,
-        font=_font(11), command=lambda v: app.update_mixed("font_lyric", v))
-    app.combo_mix_font_lyric.set(mx.get("font_lyric", "'Microsoft YaHei', sans-serif"))
+    app.combo_mix_font_lyric = make_font_picker(
+        hz, app, mx.get("font_lyric", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_mixed("font_lyric", css), width=250)
     app.combo_mix_font_lyric.pack(side="left")
     ctk.CTkButton(hz, text="颜色", width=56, height=26, corner_radius=8,
                   fg_color=mx.get("color_lyric", "#FFE600"), font=_font(11),
@@ -519,10 +538,9 @@ def build(app, root):
     app.scale_mix_playing_size.pack(side="left")
 
     hz = ctk.CTkFrame(b, fg_color="transparent"); hz.pack(fill="x", pady=(4, 0))
-    app.combo_mix_font_playing = ctk.CTkComboBox(hz, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                            "'Microsoft YaHei', sans-serif"], width=250,
-        font=_font(11), command=lambda v: app.update_mixed("font_playing", v))
-    app.combo_mix_font_playing.set(mx.get("font_playing", "'Microsoft YaHei', sans-serif"))
+    app.combo_mix_font_playing = make_font_picker(
+        hz, app, mx.get("font_playing", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_mixed("font_playing", css), width=250)
     app.combo_mix_font_playing.pack(side="left")
     ctk.CTkButton(hz, text="颜色", width=56, height=26, corner_radius=8,
                   fg_color=mx.get("color_playing", "#00FFFF"), font=_font(11),
@@ -569,10 +587,9 @@ def build(app, root):
     app.scale_mix_queue_size.pack(side="left")
 
     hz = ctk.CTkFrame(b, fg_color="transparent"); hz.pack(fill="x", pady=(4, 0))
-    app.combo_mix_font_queue = ctk.CTkComboBox(hz, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                          "'Microsoft YaHei', sans-serif"], width=250,
-        font=_font(11), command=lambda v: app.update_mixed("font_queue", v))
-    app.combo_mix_font_queue.set(mx.get("font_queue", "'Microsoft YaHei', sans-serif"))
+    app.combo_mix_font_queue = make_font_picker(
+        hz, app, mx.get("font_queue", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_mixed("font_queue", css), width=250)
     app.combo_mix_font_queue.pack(side="left")
     ctk.CTkButton(hz, text="颜色", width=56, height=26, corner_radius=8,
                   fg_color=mx.get("color_queue", "#FFFFFF"), font=_font(11),
@@ -588,10 +605,9 @@ def build(app, root):
 
     b = _section(lsc, "字体与颜色")
     h = _row(b, "字体")
-    app.combo_lyric_font = ctk.CTkComboBox(h, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                      "'Microsoft YaHei', sans-serif", "'KaiTi', sans-serif"],
-        width=300, font=_font(11), command=lambda v: app.update_lyric("font", v))
-    app.combo_lyric_font.set(ly.get("font", "'Microsoft YaHei', sans-serif"))
+    app.combo_lyric_font = make_font_picker(
+        h, app, ly.get("font", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_lyric("font", css), width=300)
     app.combo_lyric_font.pack(side="left")
     h = _row(b, "颜色")
     ctk.CTkButton(h, text="选择颜色", width=88, height=28, corner_radius=8, font=_font(11),
@@ -657,10 +673,10 @@ def build(app, root):
     pl = cfg["playing"]
     b = _section(psc, "样式")
     h = _row(b, "字体")
-    app.combo_playing_font = ctk.CTkComboBox(h, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                        "'Microsoft YaHei', sans-serif"], width=300,
-        font=_font(11), command=lambda v: app.update_playing("font", v))
-    app.combo_playing_font.set(pl.get("font", "'Microsoft YaHei', sans-serif")); app.combo_playing_font.pack(side="left")
+    app.combo_playing_font = make_font_picker(
+        h, app, pl.get("font", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_playing("font", css), width=300)
+    app.combo_playing_font.pack(side="left")
     h = _row(b, "颜色")
     ctk.CTkButton(h, text="选择颜色", width=88, height=28, corner_radius=8, font=_font(11),
                   fg_color=pl.get("color", "#00FFFF"),
@@ -687,10 +703,10 @@ def build(app, root):
     qu = cfg["queue"]
     b = _section(qsc, "样式")
     h = _row(b, "字体")
-    app.combo_queue_font = ctk.CTkComboBox(h, values=["'PingFang SC', 'Microsoft YaHei', sans-serif",
-                                                      "'Microsoft YaHei', sans-serif"], width=300,
-        font=_font(11), command=lambda v: app.update_queue("font", v))
-    app.combo_queue_font.set(qu.get("font", "'Microsoft YaHei', sans-serif")); app.combo_queue_font.pack(side="left")
+    app.combo_queue_font = make_font_picker(
+        h, app, qu.get("font", "'Microsoft YaHei', sans-serif"),
+        lambda css: app.update_queue("font", css), width=300)
+    app.combo_queue_font.pack(side="left")
     h = _row(b, "颜色")
     ctk.CTkButton(h, text="选择颜色", width=88, height=28, corner_radius=8, font=_font(11),
                   fg_color=qu.get("color", "#FFFFFF"),
@@ -752,6 +768,73 @@ def build(app, root):
     # 首屏固定在日志页（CTkTabview 默认停在最后添加的那一页）
     tabs.set(name_log)
 
+
+
+def make_font_picker(parent, app, current_css, on_change, width=250, hint_widget=None):
+    """v1.2.8：统一的字体选择器（精选字体 + 自定义）。
+
+    current_css: 配置里现有的 CSS font-family 值，如 "'Microsoft YaHei', sans-serif"
+    on_change(css_value): 用户选定后回调，参数已是合法 CSS 值
+    hint_widget: 可选，用于显示"本机没这个字体"之类提示的 Label（由调用方创建）
+
+    返回下拉框控件。选中「自定义字体…」时弹输入框。
+    """
+    import tkinter.simpledialog as _sd
+
+    def _apply_css(css, tip=""):
+        try:
+            on_change(css)
+        except Exception:
+            pass
+        if hint_widget is not None:
+            try:
+                hint_widget.configure(text=tip or "")
+            except Exception:
+                pass
+
+    def _on_pick(choice):
+        if choice == fontlib.CUSTOM_LABEL or str(choice).startswith(fontlib.CUSTOM_LABEL[:-1]):
+            cur_fam = fontlib.from_css(current_css)
+            try:
+                raw = _sd.askstring(
+                    "自定义字体",
+                    "输入字体名（中英文均可，例如：站酷快乐体 / Source Han Sans）\n"
+                    "提示：字体必须装在「运行 OBS 的那台电脑」上才会生效。",
+                    initialvalue="" if cur_fam == "Microsoft YaHei" else cur_fam,
+                    parent=parent)
+            except Exception:
+                raw = None
+            if not raw:
+                # 取消：把下拉框还原成当前值
+                try:
+                    combo.set(fontlib.label_for_css(current_css))
+                except Exception:
+                    pass
+                return
+            css, tip = fontlib.parse_custom(raw)
+            if not css:
+                if hint_widget is not None:
+                    try: hint_widget.configure(text=tip)
+                    except Exception: pass
+                return
+            _apply_css(css, tip)
+            try:
+                combo.set(fontlib.label_for_css(css))
+            except Exception:
+                pass
+            return
+
+        # 选了内置项：显示名 → CSS 值
+        for css_fam, disp, _al in fontlib.CURATED_FONTS:
+            if disp == choice:
+                _apply_css(fontlib.to_css(css_fam))
+                return
+
+    combo = ctk.CTkComboBox(
+        parent, values=fontlib.display_list(), width=width,
+        font=_font(11), state="readonly", command=_on_pick)
+    combo.set(fontlib.label_for_css(current_css))
+    return combo
 
 
 def set_label(widget, text=None, color=None, bg=None):

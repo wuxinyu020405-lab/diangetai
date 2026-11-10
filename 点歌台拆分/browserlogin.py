@@ -337,18 +337,37 @@ def _bilibili_auto_login_worker(app_instance):
         app_instance.log(f"❌ 保存配置失败: {e}")
         return
 
+    # v1.2.8 修复（关键）：登录成功后必须把结果**同步回内存 config**。
+    # 原来的坑：这里只写磁盘，主程序的 self.config 仍是启动时的空 Cookie；
+    # 之后主程序任何一次保存（改音量/调样式/定时/退出）都用内存旧值整体覆盖写，
+    # 把刚写入的 Cookie 抹回空 → 重启后显示"未配置 (缺少Cookie或房间号)"。
+    try:
+        app_cfg = getattr(app_instance, "config", None)
+        if isinstance(app_cfg, dict):
+            app_cfg["bili_cookie"] = cookie_str
+            if room_id:
+                app_cfg["room_id"] = room_id
+    except Exception as e:
+        print(f"[WARN] 回写内存 config 失败(不影响本次登录): {e}")
+
     if room_id:
         app_instance.log(f"✅ 自动获取直播间号成功：{room_id}")
         result_message = (f"B站 Cookie 和直播间号均已保存。\n直播间号：{room_id}\n\n"
-                          f"发弹幕已自动生效，无需重启。\n"
-                          f"若弹幕监听未连上，重启一次程序即可。")
+                          f"发弹幕、收弹幕都已自动生效，无需重启程序。\n"
+                          f"若右侧状态仍显示未连接，点一下「重连弹幕」即可。")
     else:
         app_instance.log("❌ 未能自动获取直播间号，请在「账号登录」页的房间号输入框手动填写。")
-        result_message = "Cookie 已保存，但未能自动获取直播间号。\n请在「账号登录」页的房间号框手动填写后重启。"
+        result_message = "Cookie 已保存，但未能自动获取直播间号。\n请在「账号登录」页的房间号框手动填写后点「重连弹幕」。"
 
     # v1.2.6：登录后立刻把新 Cookie 热灌进弹幕发送器（原来只在启动时读一次，导致登录了也发不出）
     try:
         app_instance.root.after(0, lambda: app_instance.reload_bili_sender())
+    except Exception:
+        pass
+    # v1.2.8：登录后顺手把**收弹幕**的连接也热重启，不必再重启程序。
+    # 原来 BLiveClient 只在启动时建一次，登录后新 Cookie/房间号它看不到。
+    try:
+        app_instance.root.after(0, lambda: app_instance.restart_bili_listener())
     except Exception:
         pass
     app_instance.root.after(0, lambda: app_instance.update_account_status())

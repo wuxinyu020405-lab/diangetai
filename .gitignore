@@ -1,6 +1,10 @@
 # 凭据与本地配置 —— 含真实 cookie / musickey，绝不进版本库
 config.json
 credential.json
+# 凭据类备份（历史上清理登录信息时留下的 .loginbak 等，绝不能入库）
+*.loginbak
+*.json.bak
+config*.bak
 
 # 音频缓存与下载产物
 music_cache/
@@ -91,3 +95,7 @@ pip-metadata-*/
 pip-unpack-*/
 _update_notified.json
 _update_status.json
+
+# v1.2.8：自己录的歌是用户数据，绝不入库（含可能的隐私录音）
+my_songs/
+点歌台拆分/my_songs/

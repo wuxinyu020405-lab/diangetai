@@ -23,6 +23,11 @@ CREDENTIAL_FILE = os.path.join(BASE_DIR, "credential.json")
 
 CACHE_DIR = os.path.join(BASE_DIR, "music_cache")
 
+# v1.2.8：自己录的歌放这里，程序只读。绝不并进 CACHE_DIR——那个目录按
+# 文件数/体积自动清理最旧文件，自制音源是资料不能被删。可由 config.json
+# 的 local_songs_dir 覆盖（支持绝对路径或相对 BASE_DIR）。
+LOCAL_SONGS_DIR = os.path.join(BASE_DIR, "my_songs")
+
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 

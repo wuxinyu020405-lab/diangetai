@@ -8,9 +8,12 @@ v1.2·抖音接入：指令解析抽成平台无关的 handle_message（B站 bli
 """
 
 import asyncio
+import os
 import blivedm
 from qqmusic_api import Client, Credential
+import locallib
 import musiclib
+import settings
 import state
 
 
@@ -40,8 +43,20 @@ def handle_message(app, text, uname, platform="bilibili"):
         return
     tag = "" if platform == "bilibili" else "[%s] " % platform
     # v1.2.4：先记账再处理（无论是不是指令都留档，供 AI 读直播间弹幕）
-    _is_cmd = text in ("切歌", "暂停", "继续") or text.startswith("点歌")
+    _is_cmd = (text in ("切歌", "暂停", "继续")
+               or text.startswith("点歌") or text.startswith("本地点歌"))
     _record_history(text, uname, platform, _is_cmd)
+    # v1.2.8：显式本地命令——只查 my_songs/，不回退 QQ 音乐。
+    # 必须排在普通「点歌」之前，否则会被 startswith("点歌") 误吞。
+    if text.startswith("本地点歌"):
+        local_name = text.replace("本地点歌", "", 1).strip()
+        if local_name:
+            app.log("%s收到本地点歌请求: %s - %s" % (tag, local_name, uname))
+            import time as _t
+            state.pending_requests.append({"song_name": local_name, "uname": uname,
+                                           "platform": platform, "local_only": True,
+                                           "ts": _t.time()})
+            return
     if text == "切歌":
         if state.skip_event and not state.skip_event.is_set():
             app.log("%s⏭️ 收到【切歌】指令！" % tag)
@@ -110,6 +125,42 @@ async def process_one_request(req, app_instance):
                     app_instance.log("[回执未发] %s" % blocked)
             except Exception as e:
                 app_instance.log("[WARN] 回执异常: %s" % e)
+
+    # ── v1.2.8：本地曲库短路（显式命令「本地点歌」专用，不回退 QQ 音乐）──
+    # 必须排在 QQ 登录检查之前：本地歌不需要 QQ 登录、不占配额、不联网络。
+    if req.get("local_only"):
+        cfg = getattr(app_instance, "config", {}) or {}
+        folder = cfg.get("local_songs_dir") or settings.LOCAL_SONGS_DIR
+        try:
+            thr = float(cfg.get("local_match_threshold", locallib.DEFAULT_THRESHOLD))
+        except (TypeError, ValueError):
+            thr = locallib.DEFAULT_THRESHOLD
+        result, reason = locallib.find_best(song_name, folder, threshold=thr)
+        if reason == "ok":
+            # v1.2.8：入列前先确认这文件真能播。改了后缀（如 m4a 伪装成 .mp3）、
+            # 下载不完整、编码不受支持的文件，pygame 会加载失败；不先验就会进队列
+            # 后被静默跳过，观众以为点歌没反应。这里验不过就直接算点歌失败。
+            playable, why = locallib.check_playable(result["path"])
+            if not playable:
+                msg = "点歌失败：《%s》这个文件放不出来（%s）" % (result["name"][:12], why)
+                app_instance.log("❌ 本地点歌失败: 《%s》-%s 原因: %s（文件 %s）"
+                                 % (result["name"], uname, why, result["path"]))
+                notify("@%s %s" % (uname, msg))
+                return "local_unplayable"
+            entry = locallib.make_entry(result, uname, platform="local")
+            state.playlist.append(entry)
+            app_instance.log("✅ 就绪[本地曲库 %s 相似度%.2f]: 《%s》-%s（文件 %s）"
+                             % (platform, result["score"], result["name"], uname,
+                                os.path.basename(result["path"])))
+            return "local"
+        msg = {
+            "empty_library": "本地曲库还是空的，请先把我录的歌放进 my_songs 文件夹",
+            "no_match": "本地曲库里没找到《%s》" % song_name[:12],
+            "ambiguous": "本地曲库里《%s》有几首都像，换个说法再点" % song_name[:12],
+        }.get(reason, "本地曲库匹配失败")
+        app_instance.log("❌ 本地点歌未入列: 《%s》-%s 原因: %s" % (song_name, uname, msg))
+        notify("@%s %s" % (uname, msg))
+        return "local_not_found"
 
     if not state.qq_credential:
         app_instance.log(f"❌ 《{song_name}》 未登录QQ音乐，无法处理 (请求人:{uname})")

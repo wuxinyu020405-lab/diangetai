@@ -195,6 +195,10 @@ hiddenimports += [
     "tray", "pystray", "pystray._win32", "PIL", "PIL._tkinter_finder",
     # v1.2.4：本机 AI 接口（mainapp.main_async 里 try-import，静态抓不到）
     "httpapi",
+    # v1.2.8：本地曲库（danmaku/mainapp 都 import，显式列出双保险）
+    "locallib",
+    # v1.2.8：字体候选与校验（ui_ctk 顶部 import，显式列出双保险）
+    "fontlib",
     # 抖音 provider 是函数内 import（main_async 里），静态分析抓不到，必须显式列，
     # 否则打包版启用抖音直接 ModuleNotFoundError
     "live_providers", "live_providers.douyin",

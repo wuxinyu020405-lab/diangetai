@@ -20,6 +20,7 @@ import pygame
 from qqmusic_api import Client, Credential
 import browserlogin
 import danmaku
+import locallib
 import lyrics
 import musiclib
 import overlay
@@ -34,6 +35,13 @@ import version
 
 class _BudgetExceeded(Exception):
     """第7步：单首下载时间预算超限的内部信号（档位内流式写盘时抛出）。"""
+
+
+# v1.2.8 修复用：这些配置键由"登录流程 / 自动探测 / 用户手填"独立管理，
+# 不在设置界面的保存范围内。保存设置时必须先以磁盘值为准合并，
+# 否则内存里的旧值会把它们抹掉（历史 bug：登录写入的 Cookie 被覆盖成空）。
+_EXTERN_KEYS = ("bili_cookie", "room_id", "douyin_room_id", "api_token",
+                "qqmusic_path", "local_songs_dir", "local_match_threshold")
 
 
 # ================= 主程序类 =================
@@ -593,12 +601,73 @@ class MusicApp:
         await asyncio.sleep(0.4)
         return pygame.mixer.music.get_busy()
 
+    # ═════════ v1.2.8：本地曲库（GUI 按钮 + 歌词） ═════════
+    def get_local_songs_dir(self):
+        """config.json 的 local_songs_dir 可覆盖默认 my_songs/；目录不存在就建好。"""
+        folder = (self.config.get("local_songs_dir") or settings.LOCAL_SONGS_DIR)
+        if not os.path.isabs(folder):
+            folder = os.path.join(settings.BASE_DIR, folder)
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            self.log(f"⚠️ 本地曲库目录创建失败: {e}")
+        return folder
+
+    def open_local_songs_folder(self):
+        """GUI『打开本地曲库文件夹』：建目录并用资源管理器打开，附一句指引。"""
+        folder = self.get_local_songs_dir()
+        self.log(f"📂 本地曲库：{folder}")
+        self.log(locallib.folder_hint(folder))
+        try:
+            if os.name == "nt":
+                os.startfile(folder)      # 资源管理器，零弹窗、零子进程黑窗
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as e:
+            self.log(f"⚠️ 打开文件夹失败（可手动去这个路径）: {e}")
+        try:
+            n = len(locallib.list_songs(folder))
+            self.log(f"📀 当前本地曲库共 {n} 首（每次点歌现扫，放进去即生效，无需重启）")
+        except Exception:
+            pass
+
+    def _load_local_lrc(self, audio_path):
+        """本地歌的同名 .lrc；没有就返回 []（上层显示'纯音乐'）。"""
+        try:
+            import lyrics
+            lrc = os.path.splitext(audio_path)[0] + ".lrc"
+            if os.path.exists(lrc):
+                with open(lrc, "r", encoding="utf-8-sig", errors="replace") as f:
+                    return lyrics.parse_lrc(f.read())
+        except Exception as e:
+            self.log(f"⚠️ 本地歌词读取失败: {e}")
+        return []
+
     def save_style_config(self):
         self.config["style_config"] = state.style_config
         try:
+            # ① 先读磁盘，把"外部管理的键"合并回来（磁盘有值且内存是空/旧值时以磁盘为准）
+            try:
+                disk = secretstore.read_json(settings.CONFIG_FILE, default={}) or {}
+            except Exception:
+                disk = {}
+            if isinstance(disk, dict):
+                for k in _EXTERN_KEYS:
+                    if k in disk:
+                        mem = self.config.get(k)
+                        dv = disk.get(k)
+                        # 磁盘有非空值 → 用磁盘；否则保留内存值（避免把用户新填的清掉）
+                        if dv not in (None, "", 0) or mem in (None, "", 0):
+                            self.config[k] = dv
+            # ② 再整体写回
             secretstore.write_json(settings.CONFIG_FILE, self.config)
         except Exception as e:
             print("保存配置失败:", e)
+            try:
+                self.log(f"⚠️ 保存配置失败: {e}")
+            except Exception:
+                pass
 
     def schedule_save_style(self, event=None):
         if hasattr(self, "_save_timer") and self._save_timer:
@@ -692,12 +761,27 @@ class MusicApp:
         state.style_config["lyric"]["effect"] = m.get(val, "apple_hd")
         self.schedule_save_style()
 
-    def update_audio_quality(self, event=None):
-        val = self.var_audio_quality.get()
+    def update_audio_quality(self, event=None, value=None):
+        """切换首选音质。
+
+        v1.2.8 修复：原来只读 self.var_audio_quality，而 CTkComboBox 的 command
+        回调**不会**自动更新那个 StringVar —— 结果界面上选什么都好，写进配置的
+        永远是初始化时的旧值（选「默认品质」实际仍按 flac 下载）。
+        现在优先用回调传进来的值，找不到才回退到 var。
+        """
+        val = value if value else self.var_audio_quality.get()
+        # 同步 var，保持界面与配置一致（其它地方还会读它回填）
+        try:
+            if val and self.var_audio_quality.get() != val:
+                self.var_audio_quality.set(val)
+        except Exception:
+            pass
         q_key = settings.UI_QUALITY_MAP.get(val)
-        state.style_config["audio_quality"] = settings.normalize_quality_key(q_key)
+        new_q = settings.normalize_quality_key(q_key)
+        state.style_config["audio_quality"] = new_q
         self.schedule_save_style()
-        self.log(f"🎵 点歌首选音质已切换为: 【{val}】 (无对应音源时自动平滑降级)")
+        self.log(f"🎵 点歌首选音质已切换为: 【{val}】→ 实际档位 {new_q} (无对应音源时自动平滑降级)")
+        return new_q
     
     def browse_qq_path(self):
         path = filedialog.askopenfilename(title="选择 QQMusic.exe", filetypes=[("Executable", "*.exe")])
@@ -822,11 +906,10 @@ class MusicApp:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", "Referer": f"https://live.bilibili.com/{self.config.get('room_id', '')}", "Origin": "https://live.bilibili.com"}
         
         async with aiohttp.ClientSession(cookies=cookies, headers=headers, trust_env=False) as http_session:
-            if self.config.get('room_id'):
-                client = blivedm.BLiveClient(int(self.config['room_id']), session=http_session)
-                client.set_handler(danmaku.BiliHandler(self)); client.start(); self.log("✅ 连接 B 站成功！等待弹幕中...")
-            else:
-                self.log("❌ 缺少 B站 房间号，请点击顶部登录 B站！")
+            self._bili_session = http_session
+            # v1.2.8：B站监听改成可热重启（登录后不用重启程序）。
+            # 连接持有在实例上，restart_bili_listener() 可随时拆掉重建。
+            await self._start_bili_listener()
             # v1.2·抖音双平台：配置了 douyin_room_id 就并起一路匿名弹幕
             dy_room = str(self.config.get('douyin_room_id', '') or '').strip()
             if dy_room:
@@ -840,8 +923,105 @@ class MusicApp:
             try:
                 while True: await asyncio.sleep(3600)
             finally:
-                if self.config.get('room_id'):
-                    await client.stop_and_close()
+                await self._stop_bili_listener()
+                self._bili_session = None
+
+    # ═════════ v1.2.8：B站弹幕监听热重启（登录后免重启程序）═════════
+    async def _start_bili_listener(self):
+        """(重)建 B站弹幕监听。必须在 asyncio loop 线程里调用。
+
+        为什么要有这个方法：原来 BLiveClient 只在 main_async 里建一次，
+        登录后拿到的新 Cookie/房间号根本不会被它看到，必须重启程序才收得到弹幕。
+        拆出来之后，restart_bili_listener() 可以在登录成功时拆旧建新。
+        """
+        room = str(self.config.get("room_id") or "").strip()
+        if not room:
+            self.log("❌ 缺少 B站 房间号，请点击顶部登录 B站！")
+            self._bili_client = None
+            self._bili_room = None
+            return False
+        try:
+            session = getattr(self, "_bili_session", None)
+            if session is None:
+                self.log("⚠️ 弹幕监听重建失败：HTTP 会话未就绪")
+                return False
+            # v1.2.8：cookie 每次从 config 现取，不再用启动时那份
+            cookie_str = str(self.config.get("bili_cookie") or "")
+            cookies = {}
+            for item in cookie_str.split(";"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    cookies[k.strip()] = v.strip()
+            client = blivedm.BLiveClient(int(room), session=session)
+            # 把最新 Cookie 灌进共享会话（blivedm 用这个 session 的 cookie 鉴权）
+            try:
+                session.cookie_jar.update_cookies(cookies)
+            except Exception as e:
+                self.log(f"⚠️ 更新 Cookie 到弹幕会话失败（可能影响身份相关弹幕）: {e}")
+            client.set_handler(danmaku.BiliHandler(self))
+            client.start()
+            self._bili_client = client
+            self._bili_room = room
+            self.log(f"✅ 连接 B 站成功！等待弹幕中...（房间 {room}）")
+            return True
+        except Exception as e:
+            self.log(f"❌ 连接 B 站失败: {type(e).__name__}: {e}")
+            self._bili_client = None
+            return False
+
+    async def _stop_bili_listener(self):
+        """停掉现有 B站监听（尽力而为，异常不影响后续重建）。"""
+        client = getattr(self, "_bili_client", None)
+        self._bili_client = None
+        if client is None:
+            return
+        try:
+            await client.stop_and_close()
+        except Exception as e:
+            print(f"[WARN] 停止 B站弹幕连接异常(已忽略): {e}")
+
+    async def _restart_bili_listener_async(self):
+        """拆旧建新。加锁防重入（连点两次登录不会建出两条连接）。"""
+        if getattr(self, "_bili_restarting", False):
+            self.log("ℹ️ 弹幕监听正在重连中，稍候…")
+            return
+        self._bili_restarting = True
+        try:
+            old_room = getattr(self, "_bili_room", None)
+            await self._stop_bili_listener()
+            ok = await self._start_bili_listener()
+            new_room = getattr(self, "_bili_room", None)
+            if ok:
+                if old_room and new_room and old_room != new_room:
+                    self.log(f"🔁 弹幕监听已切换房间：{old_room} → {new_room}")
+                else:
+                    self.log("🔁 弹幕监听已重连（新的登录信息已生效，无需重启程序）")
+            else:
+                self.log("⚠️ 弹幕监听重连失败，可点「重连弹幕」重试")
+        finally:
+            self._bili_restarting = False
+
+    def restart_bili_listener(self, notify_ui=False):
+        """对外入口（可从 Tk 线程调用）：把重连投递到 asyncio loop 线程执行。"""
+        loop = getattr(self, "loop", None)
+        if loop is None or loop.is_closed():
+            self.log("⚠️ 播放引擎还没就绪，弹幕监听稍后再重连")
+            return False
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._restart_bili_listener_async(), loop)
+            return True
+        except Exception as e:
+            self.log(f"❌ 弹幕监听重连投递失败: {e}")
+            return False
+
+    def gui_restart_bili_listener(self):
+        """GUI『重连弹幕』按钮：手动兜底，帮用户看到结果。"""
+        if self.restart_bili_listener():
+            try:
+                self.log("🔄 正在重连 B站弹幕监听…")
+            except Exception:
+                pass
 
     async def _douyin_dispatcher(self):
         """抖音消息队列 → 统一指令入口 handle_message（与 B 站同一行为）。
@@ -1232,8 +1412,12 @@ class MusicApp:
 
                 preferred_q = settings.normalize_quality_key(state.style_config.get("audio_quality", "flac"))
 
-                # 需求2·本地优先：任意有效档命中即用（与下载侧同一判据）
-                file_path = musiclib.find_any_cached_file(song_mid)
+                # v1.2.8：本地曲库条目自带 file_path，直接用，不再按 mid 查缓存。
+                # 普通 QQ 音乐条目没有该字段，回退到原有的缓存检索逻辑，行为不变。
+                file_path = state.current_song.get("file_path")
+                if not file_path:
+                    # 需求2·本地优先：任意有效档命中即用（与下载侧同一判据）
+                    file_path = musiclib.find_any_cached_file(song_mid)
 
                 has_file = bool(file_path and os.path.exists(file_path) and os.path.getsize(file_path) > 0)
 
@@ -1256,8 +1440,13 @@ class MusicApp:
                     ext_tag = os.path.splitext(file_path)[1].lstrip(".").upper() or "AUDIO"
                     self.log(f"✅ 开始独立播放 [Pygame | {ext_tag}]: {real_name}")
                     state.system_media_info = {"title": f"{state.current_song['display_name']}-{requester}", "artist": ""}
-                    state.active_lrc_lines = await self.fetch_lyrics_by_mid_or_keyword(song_mid=song_mid, keyword=state.current_song['display_name'])
-                    
+                    # v1.2.8：本地曲库条目没有 mid，不能按歌名去 QQ 搜歌词（会抓到别人的）。
+                    # 有同名 .lrc 就读它，否则显示"纯音乐"。普通条目走原逻辑不变。
+                    if state.current_song.get("file_path"):
+                        state.active_lrc_lines = self._load_local_lrc(state.current_song["file_path"])
+                    else:
+                        state.active_lrc_lines = await self.fetch_lyrics_by_mid_or_keyword(song_mid=song_mid, keyword=state.current_song['display_name'])
+
                     if not state.active_lrc_lines:
                         state.active_lrc_lines = [(0.0, state.style_config["lyric"].get("pure_text", "纯音乐, 请欣赏.."))]
 
