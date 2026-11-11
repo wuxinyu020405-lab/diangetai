@@ -40,7 +40,7 @@ class _BudgetExceeded(Exception):
 # v1.2.8 修复用：这些配置键由"登录流程 / 自动探测 / 用户手填"独立管理，
 # 不在设置界面的保存范围内。保存设置时必须先以磁盘值为准合并，
 # 否则内存里的旧值会把它们抹掉（历史 bug：登录写入的 Cookie 被覆盖成空）。
-_EXTERN_KEYS = ("bili_cookie", "room_id", "douyin_room_id", "api_token",
+_EXTERN_KEYS = ("bili_cookie", "room_id", "douyin_room_id",
                 "qqmusic_path", "local_songs_dir", "local_match_threshold")
 
 
@@ -286,7 +286,7 @@ class MusicApp:
             return
         if not sender.ready():
             self._set_send_result("❌ 未登录 B站（Cookie 缺 bili_jct）——请先「重新登录 B站」", "#EF4444")
-            self.log("❌ 发弹幕失败：Cookie 缺 bili_jct/SESSDATA，请在「弹幕与 AI」页点重新登录")
+            self.log("❌ 发弹幕失败：Cookie 缺 bili_jct/SESSDATA，请在「弹幕」页点重新登录")
             return
         reason = sender.send(text)
         if reason:
@@ -376,33 +376,6 @@ class MusicApp:
                 self.root.after(0, lambda: self._set_send_result("❌ 测试异常：%s" % e, "#EF4444"))
 
         threading.Thread(target=_work, daemon=True).start()
-
-    def gen_api_token(self):
-        """一键生成随机 API Token 并填入输入框（改完需重启生效）。"""
-        import secrets
-        tok = secrets.token_urlsafe(18)
-        try:
-            self.entry_api_token.delete(0, "end")
-            self.entry_api_token.insert(0, tok)
-        except Exception:
-            pass
-        self.config["api_token"] = tok
-        self.schedule_save_style()
-        self.log("🔑 已生成新的 API Token（重启后生效）")
-
-    def _on_history_size_change(self, val):
-        """弹幕历史容量输入：即时改内存容量并落配置。"""
-        try:
-            n = int(str(val).strip() or 0)
-        except ValueError:
-            return
-        if n < 0:
-            return
-        self.config["danmaku_history_size"] = n
-        state.danmaku_history_size = n
-        if n > 0 and len(state.danmaku_history) > n:
-            del state.danmaku_history[:len(state.danmaku_history) - n]
-        self.schedule_save_style()
 
     # ═════════ v1.2.5：外部优雅退出通道（安装包覆盖升级用）══════════
     def _start_quit_watcher(self):
@@ -869,15 +842,7 @@ class MusicApp:
         web_app.router.add_get('/playing', overlay.handle_index)
         web_app.router.add_get('/queue', overlay.handle_index)
         web_app.router.add_get('/api/data', overlay.handle_api)
-        # v1.2.4：给 AI/脚本的本机双向接口（同端口，token 鉴权，见 httpapi.py）
-        try:
-            import httpapi
-            httpapi.register(web_app)
-            self.log("✅ 本机 API 已启用" if httpapi._cfg_token()
-                     else "ℹ️ 本机 API 未启用：config.json 里设 api_token 后重启即可")
-        except Exception as _e:
-            self.log(f"⚠️ 本机 API 挂载失败（点歌播放不受影响）: {_e}")
-        
+
         runner = web.AppRunner(web_app); await runner.setup()
         # 端口自动顺延：8080 被别的程序占着时，依次试 8081~8090，
         # 并把实际端口写回 state.overlay_port 供 GUI 复制挂件地址用。
@@ -899,13 +864,6 @@ class MusicApp:
                 self.log(f"⚠️ 默认端口 8080 被占用，已自动改用 {bound}，OBS 源地址请用 http://127.0.0.1:{bound}/")
             self.log("✅ OBS 网页服务器已启动")
         musiclib.load_quota_state()   # 第5步：跨重启恢复当日配额记账（跨日自动归零）
-        # v1.2.4：弹幕历史容量（config.json 可调，0=不记录）
-        try:
-            state.danmaku_history_size = int(self.config.get("danmaku_history_size", 200))
-        except Exception:
-            state.danmaku_history_size = 200
-        if state.danmaku_history_size > 0:
-            self.log(f"📜 弹幕历史缓存：最近 {state.danmaku_history_size} 条（供本机 API 读取）")
         self.init_audio_engine()
 
         asyncio.create_task(self.music_player_worker()); asyncio.create_task(self.system_media_worker()); asyncio.create_task(self.lyric_sync_worker())

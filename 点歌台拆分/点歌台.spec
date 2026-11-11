@@ -193,8 +193,6 @@ hiddenimports += [
     "secretstore",
     # v1.2.2：系统托盘（mainapp 方法内 import tray；tray 内 import pystray/PIL）
     "tray", "pystray", "pystray._win32", "PIL", "PIL._tkinter_finder",
-    # v1.2.4：本机 AI 接口（mainapp.main_async 里 try-import，静态抓不到）
-    "httpapi",
     # v1.2.8：本地曲库（danmaku/mainapp 都 import，显式列出双保险）
     "locallib",
     # v1.2.8：字体候选与校验（ui_ctk 顶部 import，显式列出双保险）

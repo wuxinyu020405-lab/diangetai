@@ -148,7 +148,7 @@ def build(app, root):
     # v1.2.6：标签页从 8 个增至 9 个，长名在 894px 宽下会被裁切，统一收短（快捷按钮文字不受影响）
     name_log = "日志"
     name_acct = "账号"
-    name_dmai = "弹幕/AI"
+    name_dmai = "弹幕"
     name_queue_page = "队列"
     name_basic = "音质"
     name_mix = "挂件"
@@ -273,7 +273,7 @@ def build(app, root):
                   fg_color=("#64748B", "#475569"), font=_font(12),
                   command=app.update_account_status).pack(anchor="w")
 
-    # ══════════════════ 弹幕与 AI（v1.2.6 独立设置页）══════════════════
+    # ══════════════════ 弹幕（B站弹幕发送设置）══════════════════
     dmai_page = pages[name_dmai]
     dmai_sc = scroller(dmai_page)
 
@@ -338,32 +338,6 @@ def build(app, root):
             pass
         root.after(3000, _poll_dm_status)
     root.after(1200, _poll_dm_status)
-
-    # ── 本机 AI 接口 ──
-    b = _section(dmai_sc, "本机 AI 接口", "给 AI/脚本读写本机；仅 127.0.0.1，必须带 token")
-    h = _row(b, "API Token")
-    app.entry_api_token = ctk.CTkEntry(h, width=300, font=_font(12), placeholder_text="留空=接口关闭；填任意字符串=启用")
-    app.entry_api_token.insert(0, str(app.config.get("api_token", "") or ""))
-    app.entry_api_token.pack(side="left")
-    live_entry(app.entry_api_token, lambda v: (app.config.__setitem__("api_token", v.strip()), app.schedule_save_style()))
-    ctk.CTkButton(h, text="随机生成", width=80, height=28, corner_radius=8,
-                  fg_color=("#64748B", "#475569"), font=_font(11),
-                  command=app.gen_api_token).pack(side="left", padx=(8, 0))
-    app.lbl_api_hint = ctk.CTkLabel(
-        b,
-        text=f"改完需重启生效。接口地址：http://127.0.0.1:{{端口}}/api/state?token=你的token\n"
-             f"读取：/api/state /api/danmaku /api/queue\n"
-             f"写入：/api/send /api/queue/add /api/queue/remove /api/queue/move /api/skip /api/pause",
-        font=_font(10), text_color=MUTED, anchor="w", justify="left")
-    app.lbl_api_hint.pack(anchor="w", pady=(6, 0))
-
-    h = _row(b, "弹幕历史条数", "供 AI 读最近弹幕；0=不记录")
-    app.entry_dm_hist = ctk.CTkEntry(h, width=90, font=_font(12), placeholder_text="200")
-    app.entry_dm_hist.insert(0, str(app.config.get("danmaku_history_size", 200)))
-    app.entry_dm_hist.pack(side="left")
-    live_entry(app.entry_dm_hist, app._on_history_size_change)
-    ctk.CTkLabel(h, text="改完需重启生效", font=_font(10), text_color=MUTED).pack(side="left", padx=(8, 0))
-
 
     # ══════════════════ 队列管理（v1.2.2：查看/删除 排队·就绪点歌）══════════════════
     qm_page = pages[name_queue_page]
