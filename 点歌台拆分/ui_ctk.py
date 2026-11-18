@@ -397,6 +397,21 @@ def build(app, root):
                   fg_color=("#64748B", "#475569"), font=_font(11),
                   command=app.browse_qq_path).pack(side="left", padx=(8, 0))
 
+    # ═════════ v1.2.10：点歌时暂停谁的 BGM（用户可在自动/只QQ音乐/不暂停间选）═════════
+    _BG = {"auto": "自动识别", "qqmusic": "只暂停 QQ音乐", "off": "不暂停"}
+    b = _section(basic_sc, "点歌时暂停谁的 BGM", "点歌开始→暂停，播完→恢复")
+    h = _row(b, "暂停对象")
+    app.combo_bgm_target = ctk.CTkComboBox(
+        h, values=[_BG["auto"], _BG["qqmusic"], _BG["off"]], width=150,
+        font=_font(12), state="readonly", command=app.update_bgm_target)
+    app.combo_bgm_target.set(_BG.get((app.config.get("bgm_target") or "auto"), _BG["auto"]))
+    app.combo_bgm_target.pack(side="left")
+    ctk.CTkLabel(b,
+        text="自动识别=谁在放歌就暂停谁（含网页视频）\n"
+             "只暂停 QQ音乐=其他声音一律不碰\n"
+             "不暂停=点歌时你自己手动处理",
+        font=_font(10), text_color=MUTED, anchor="w", justify="left").pack(anchor="w", pady=(6, 0))
+
     # ═════════ v1.2.8：本地曲库（只加一行按钮 + 说明，不动 9 标签布局）═════════
     b = _section(basic_sc, "本地曲库（自己录的歌）",
                  "观众发「本地点歌 歌名」只在这里找相似度最高的一首播放")

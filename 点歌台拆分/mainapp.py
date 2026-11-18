@@ -793,6 +793,17 @@ class MusicApp:
             self.save_style_config()
             self.log(f"✅ QQ音乐路径已更新并保存: {path}")
 
+    def update_bgm_target(self, event=None, value=None):
+        """v1.2.10：点歌时暂停谁的 BGM。CTkComboBox 不会自动写 var，必须用参数。"""
+        _REV = {"自动识别": "auto", "只暂停 QQ音乐": "qqmusic", "不暂停": "off"}
+        val = value if value else (self.combo_bgm_target.get() if hasattr(self, "combo_bgm_target") else "")
+        key = _REV.get((val or "").strip())
+        if not key:
+            return
+        self.config["bgm_target"] = key
+        self.save_style_config()
+        self.log("✅ 点歌暂停对象已设为：%s" % val)
+
     def copy_to_clipboard(self, text):
         self.root.clipboard_clear(); self.root.clipboard_append(text); self.log(f"📋 已复制到剪贴板: {text}")
 
@@ -1070,25 +1081,59 @@ class MusicApp:
 
             await asyncio.sleep(0.08)
 
-    async def get_best_smtc_session(self, sessions_mgr):
+    # v1.2.10：QQ 音乐在 SMTC 里的 SourceAppUserModelId 实测就是 "QQMusic.exe"
+    # （本机 2026-11-19 实测：AUMID=[QQMusic.exe] / 浏览器是 MSEdge）
+    _QQMUSIC_AUMID_HINTS = ("qqmusic", "tencent")
+
+    @staticmethod
+    def _is_qqmusic_session(s):
+        """会话是否来自 QQ 音乐（兼容 AUMID 带包名的长串写法）。"""
+        try:
+            aumid = (s.source_app_user_model_id or "").lower()
+        except Exception:
+            return False
+        return any(h in aumid for h in MusicApp._QQMUSIC_AUMID_HINTS)
+
+    async def get_best_smtc_session(self, sessions_mgr, target=None):
+        """挑一个媒体会话。
+
+        target: None/"auto" 谁在放歌就用谁（老行为，歌词读取也用这个）；
+                "qqmusic"   只认 QQ 音乐（点歌暂停 BGM 用）；
+                "off"       不接管（返回 None）。
+        """
+        if target == "off":
+            return None
         if not sessions_mgr: return None
         try:
-            all_sessions = sessions_mgr.get_sessions(); fallback_session = None
+            all_sessions = sessions_mgr.get_sessions()
+            if target == "qqmusic":
+                all_sessions = [s for s in all_sessions if self._is_qqmusic_session(s)]
+                if not all_sessions:
+                    return None
+            fallback_session = None
             for s in all_sessions:
                 try:
                     pinfo = s.get_playback_info()
                     if pinfo and pinfo.playback_status == 4: return s
                     if fallback_session is None: fallback_session = s
                 except Exception: continue
+            if target == "qqmusic":
+                return fallback_session        # QQ 音乐暂停着也算目标，下一首还要恢复它
             return sessions_mgr.get_current_session() or fallback_session
         except Exception:
             try: return sessions_mgr.get_current_session()
             except Exception: return None
 
+
     async def control_local_music(self, pause=True):
         global is_local_playing, bgm_paused_by_bot
+        # v1.2.10：按用户选项决定暂停谁——auto 自动识别 / qqmusic 只暂停 QQ音乐 / off 不接管
+        target = (self.config.get("bgm_target") or "auto").strip().lower()
+        if target == "off":
+            self.log("⏸️ 已设置不暂停 BGM，跳过")
+            return
         try:
-            sessions_mgr = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async(); session = await self.get_best_smtc_session(sessions_mgr)
+            sessions_mgr = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async(); session = await self.get_best_smtc_session(sessions_mgr, target)
             if session:
                 playback_info = session.get_playback_info()
                 if pause and playback_info.playback_status == 4: 
