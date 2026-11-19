@@ -6,7 +6,7 @@ B 站直播间弹幕点歌 + OBS 可视化一体化工具。观众发「点歌 �
 
 由单文件 `扫码点歌台_优化首次成功_4.py` 拆分而来（原版已归档在 git 历史首
 个基线提交），拆分后又落地了三批需求改造：串行点歌、两档音质、本地优先、
-配额熔断、失败归因、端口顺延、pywebview 登录、customtkinter 界面。
+配额熔断、失败归因、端口顺延、pywebview 登录、PySide6 界面。
 **v1.0 已经朋友实机验证通过（2026-10-28）。**
 
 **v1.1 新增**：暂停/继续（弹幕 `暂停`/`继续` + GUI 按钮）、OBS 挂件 XSS 转义修复、
@@ -29,16 +29,28 @@ python 点歌台拆分\main.py --selftest # 自检：依赖/WebView2/内嵌浏�
 | 文件 | 职责 |
 | --- | --- |
 | `main.py` | 入口 + `--selftest` 自检 + .NET 运行时定位（coreclr/DOTNET_ROOT） |
-| `mainapp.py` | `MusicApp`：customtkinter 控制台 + asyncio worker 编排 + 下载主流程 |
+| `mainapp.py` | `MusicApp` 总装：类核心（__init__/setup_ui/log）+ 托盘与退出 + 拼装 6 个 mixin（约 360 行） |
+| `app_download.py` | 下载管线 mixin：QQ 音乐取址、缓存放回、音质降级链、单首预算 |
+| `app_player.py` | 播放 mixin：pygame 音量、起播确认、暂停/切歌意图、播放器 worker |
+| `app_media.py` | 媒体 mixin：SMTC 会话识别、歌词获取与同步 |
+| `app_listener.py` | 监听 mixin：asyncio 主循环、B站弹幕、抖音消息、OBS 服务 |
+| `app_ui.py` | 界面回调 mixin：设置项写入、队列管理页、配置落盘 |
+| `app_danmaku.py` | 弹幕发送 mixin：手动发弹幕、热刷新发送器、设置即时生效、测试发送 |
 | `danmaku.py` | 弹幕指令解析（点歌/切歌）+ 串行点歌 worker（就绪才入列） |
 | `overlay.py` | OBS 浏览器源：单页 HTML + `/`、`/lyric`、`/playing`、`/queue`、`/api/data` |
 | `musiclib.py` | QQ 音乐取址/枚举探测、缓存管理、失败归因、配额记账（跨重启） |
 | `settings.py` | 路径/配置合并/两档音质链/凭据存取/浏览器与驱动版本探测 |
 | `browserlogin.py` | pywebview（WebView2）内嵌扫码登录 B站 / QQ音乐，无残留进程 |
-| `ui_ctk.py` | customtkinter 界面（7 个标签页），只写配置不写业务 |
+| `qtapp.py` | PySide6 + qfluentwidgets 界面（5 个页面 + 侧栏「关于」），只写配置不写业务 |
+| `qtshim.py` | Qt 控件的 tkinter 脸适配层（弹窗/取色/选文件/控件读写），让 mainapp 少改 |
 | `lyrics.py` | LRC 解析、当前行窗口计算 |
 | `smtc.py` | 兜底：从 QQ 音乐窗口标题读正在播放 |
 | `state.py` | 跨模块运行时状态（一律 `state.xxx` 属性访问，不用裸 global） |
+
+> **关于 app_*.py（R-23）**：这 6 个文件都是 `MusicApp` 的 mixin，不是独立模块。
+> 里面每个方法都在原类的 `self` 上，通过 `class MusicApp(DownloadMixin, PlayerMixin, ...)`
+> 合回同一个类。调用方（qtapp / updater / 回归脚本）完全感觉不到拆分。
+> 拆分原则是「只搬家不改逻辑」，验证方式是逐个方法比对方法体是否逐行一致。
 
 ## 关键行为
 

@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""真控件冒烟：用真 customtkinter 复刻顶栏「版本 + 更新按钮」那一小段，
-验证 updater 的显示/隐藏、文案、pack 顺序在真实控件上确实成立（不是只有假对象过）。
+"""真控件冒烟（Qt 版，R-22）：在真 PySide6 窗口上验证更新入口的接线。
+
+R-15 把界面换成 Qt 后，更新入口不再是顶栏「检查更新 / ⬆下载」抢同一个位置，
+而是侧栏「关于」对话框里的两个按钮。旧的 customtkinter 冒烟脚本（复刻旧顶栏）
+随 ui_ctk.py 一起作废，这里按新界面重写。
 
 用法: ./.venv/Scripts/python.exe -X utf8 _test_upd_ui.py
 """
@@ -15,24 +18,31 @@ except Exception:
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT, "点歌台拆分"))
 
-import customtkinter as ctk      # noqa: E402
-import ui_ctk                    # noqa: E402
-import updater                   # noqa: E402
-import version                   # noqa: E402
-
-ACCENT = ui_ctk.ACCENT
-_font = ui_ctk._font
+from PySide6.QtCore import Qt          # noqa: E402
+import qtapp                           # noqa: E402
+import updater                         # noqa: E402
+import version                         # noqa: E402
 
 
-class App:
-    """只用界面回调用得到的那点东西（log/root/两个按钮）。"""
+class FakeApp:
+    """界面回调用得到的那点东西（config / log / 音量）。"""
 
     def __init__(self, root):
         self.root = root
+        self.config = {"room_id": "1968146663", "ui_theme": "light"}
         self.logs = []
 
     def log(self, m):
         self.logs.append(str(m))
+
+    def get_volume(self):
+        return 0.8
+
+    def schedule_save_style(self):
+        pass
+
+    def __getattr__(self, name):
+        return lambda *a, **k: None
 
 
 RESULTS = []
@@ -43,69 +53,89 @@ def ck(name, cond, extra=""):
     print(("  PASS " if cond else "  FAIL ") + name + ("" if cond else "  [" + str(extra) + "]"))
 
 
-root = ctk.CTk()
-root.geometry("880x80+1600+1600")     # 屏幕外，跑完就销毁
-ctk.set_appearance_mode("dark")
+app = qtapp.make_app()
+win = qtapp.MainWindow()
+win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)   # 不弹到用户屏幕上
+fake = FakeApp(win)
+qtapp.build(fake, win)
+app.processEvents()
 
-top = ctk.CTkFrame(root, corner_radius=0, height=64)
-top.pack(fill="x")
-top.pack_propagate(False)
+print("═══ 更新入口 · 真控件冒烟（Qt）═══")
 
-# ── 与 ui_ctk.py 完全一致的一段（改了这里也要同步那边）──
-upd_bar = ctk.CTkFrame(top, fg_color="transparent")
-upd_bar.pack(side="right")
-ctk.CTkLabel(upd_bar, text=version.DISPLAY, font=_font(11)).pack(side="left", padx=(0, 6))
-app = App(root)
-app.btn_check_update = ctk.CTkButton(
-    upd_bar, text="检查更新", width=64, height=26, corner_radius=8,
-    fg_color=("white", "#334155"), hover_color=ACCENT, font=_font(11),
-    text_color=("#334155", "white"),
-    command=lambda: None)
-app.btn_check_update.pack(side="left")
-app.btn_update_link = ctk.CTkButton(
-    upd_bar, text="", width=104, height=26, corner_radius=8,
-    fg_color=ACCENT, hover_color=("#1D4ED8", "#2563EB"), font=_font(11, True),
-    text_color="white",
-    command=lambda: updater.open_setup_download(app))
-updater.register_update_link(app)
-root.update()
+# ① 新界面没有顶栏那两个按钮；register_update_link 对 None 按钮必须是安全的空操作
+ck("新界面顶栏没有更新按钮（两个都 None）",
+   fake.btn_check_update is None and fake.btn_update_link is None)
+ck("没有按钮时 register_update_link 不炸", updater._link.get("app") is fake)
 
-print("═══ 顶栏更新按钮 · 真控件冒烟 ═══")
-ck("初始：检查更新可见", app.btn_check_update.winfo_ismapped())
-ck("初始：下载按钮不可见", not app.btn_update_link.winfo_ismapped())
-w0 = upd_bar.winfo_reqwidth()
+# ② 「关于」：标题是版本号，两个按钮各就各位
+dlg = qtapp.AboutDialog(win)
+app.processEvents()
+ck("「关于」标题带版本号", version.DISPLAY in dlg.titleLabel.text(), dlg.titleLabel.text())
+ck("有「检查更新」按钮", dlg.yesButton.text() == "检查更新", dlg.yesButton.text())
+ck("有「下载新版」按钮", dlg.dlButton.text() == "下载新版", dlg.dlButton.text())
 
-updater._set_latest("v1.2.9.3", "https://github.com/x/y/releases/tag/v1.2.9.3", [
-    {"name": "diangetai-Setup-v1.2.9.3.exe", "browser_download_url": "https://x/setup.exe"}])
-updater._show_link(app, "v1.2.9.3")
-root.update()
-ck("有新版：下载按钮可见", app.btn_update_link.winfo_ismapped())
-ck("有新版：文案带版本号",
-   app.btn_update_link.cget("text") == "⬆ 下载 v1.2.9.3", app.btn_update_link.cget("text"))
-ck("有新版：检查更新让位", not app.btn_check_update.winfo_ismapped())
-w1 = upd_bar.winfo_reqwidth()
-# 实测（缩放 2.0）：检查更新占 109 逻辑 px，下载按钮占 150 逻辑 px → 多 41 逻辑 px；
-# 顶栏原有内容约 814 逻辑 px，880 的窗口装得下。这里卡 100 物理 px（=50 逻辑）留余量。
-ck("占位只多 %d 物理 px（≤100）" % (w1 - w0), w1 - w0 <= 100, (w0, w1))
+# ③ 已经查到新版：再打开「关于」时内容里会说清楚
+updater._set_latest("v1.2.9.3", "https://github.com/x/y/releases/tag/v1.2.9.3",
+                    [{"name": "diangetai-Setup-v1.2.9.3.exe",
+                      "browser_download_url": "https://x/setup.exe"}])
+dlg._refresh()
+app.processEvents()
+ck("有新版时「关于」里提到版本号", "v1.2.9.3" in dlg.contentLabel.text(),
+   dlg.contentLabel.text())
 
-# 点下去真的走 open_setup_download（不真开浏览器，只打桩 webbrowser）
+# ④ 点「下载新版」→ 走 updater.open_setup_download（打桩，不真开浏览器）
+hits = []
 opened = []
-_saved = updater.webbrowser.open
-updater.webbrowser.open = lambda url, **kw: (opened.append(url), True)[1]
+_orig_dl = updater.open_setup_download
+
+
+def _fake_dl(app=None):
+    hits.append(app)
+    opened.append(updater.latest_info().get("setup_url"))
+    return True
+
+
+updater.open_setup_download = _fake_dl
 try:
-    app.btn_update_link.invoke()
+    dlg.dlButton.click()
+    app.processEvents()
 finally:
-    updater.webbrowser.open = _saved
-root.update()
-ck("点按钮 → 默认浏览器打开 setup 直链", opened == ["https://x/setup.exe"], opened)
-ck("日志有交代", any("默认浏览器" in m for m in app.logs), app.logs[-1:])
+    updater.open_setup_download = _orig_dl
+ck("点「下载新版」→ 调 open_setup_download", hits == [fake], hits)
+ck("下载地址就是 Setup 直链", opened == ["https://x/setup.exe"], opened)
 
-updater._hide_link(app)
-root.update()
-ck("无新版后恢复：检查更新回来了", app.btn_check_update.winfo_ismapped())
-ck("无新版后恢复：下载按钮消失", not app.btn_update_link.winfo_ismapped())
+# ⑤ 点「检查更新」→ 走 manual_check
+checks = []
+_orig_chk = updater.manual_check
+updater.manual_check = lambda app=None: checks.append(app)
+try:
+    dlg.yesButton.click()
+    app.processEvents()
+finally:
+    updater.manual_check = _orig_chk
+ck("点「检查更新」→ 调 manual_check", checks == [fake], checks)
+dlg.deleteLater()
 
-root.destroy()
+# ⑥ 没查到版本时打开「关于」：默认说明；这时点下载只写日志、不开浏览器
+updater._latest.update({"tag": None, "release_url": "", "setup_url": "", "direct": False})
+dlg2 = qtapp.AboutDialog(win)
+app.processEvents()
+ck("无新版时是默认说明", "点「检查更新」" in dlg2.contentLabel.text(),
+   dlg2.contentLabel.text())
+opened2 = []
+_saved_web = updater.webbrowser.open
+updater.webbrowser.open = lambda url, **kw: (opened2.append(url), True)[1]
+try:
+    dlg2.dlButton.click()
+    app.processEvents()
+finally:
+    updater.webbrowser.open = _saved_web
+ck("没版本信息就点下载：不开浏览器、只提示",
+   opened2 == [] and any("还没有" in m for m in fake.logs), (opened2, fake.logs[-1:]))
+dlg2.deleteLater()
+
+win.deleteLater()
+app.processEvents()
 
 bad = [n for n, ok in RESULTS if not ok]
 print("\n═══ 结果: %d/%d 通过 ═══" % (len(RESULTS) - len(bad), len(RESULTS)))

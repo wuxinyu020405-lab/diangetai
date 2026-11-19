@@ -106,3 +106,8 @@ bilibili_cookies.json
 # AI 工具会话/记忆临时目录（与项目无关）
 .cross-session/
 .mnemon/
+
+# PyInstaller 中间产物（R-26 起打包用 build_rXX 目录）
+build_r*/
+# 本地测试包目录
+dist_r*/

@@ -16,6 +16,7 @@ import asyncio, os, sys, time, struct, wave, math
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "点歌台拆分"))
 sys.stdout.reconfigure(encoding="utf-8")
 import state, mainapp
+import app_media            # R-23：SMTC 相关方法搬到 app_media，打桩要打在它身上
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 results = []
@@ -28,6 +29,8 @@ class _FakeTimeline:
         @staticmethod
         def total_seconds(): return 10.0
 class _FakeSession:
+    # R-25：歌词只认 QQ 音乐会话，假会话必须带 AUMID，否则会被当成"非QQ音乐"跳过
+    source_app_user_model_id = "QQMusic.exe"
     def get_playback_info(self):
         class P: playback_status = 4
         return P()
@@ -47,14 +50,19 @@ class _FakeWmc:
 def _mk_media_app(fetch_calls):
     class A:
         def log(self, m): pass
-        async def get_best_smtc_session(self, mgr): return mgr.get_current_session()
+        async def get_best_smtc_session(self, mgr, target=None):
+            # R-25：worker 现在固定按 target="qqmusic" 取会话；假会话就是 QQ 音乐
+            return mgr.get_current_session()
         async def fetch_lyrics_by_mid_or_keyword(self, song_mid=None, keyword=None):
             fetch_calls.append((song_mid, keyword))
             return [(0.0, "第一行"), (5.0, "第二行"), (10.0, "第三行")]
     return A()
 
 async def test_bgm_resume():
-    mainapp.wmc = _FakeWmc   # 伪造 SMTC
+    # R-23：system_media_worker 已搬到 app_media，读的是 app_media.wmc；
+    # mainapp.wmc 也一起设，兼容其它可能还在用旧位置的代码。
+    app_media.wmc = _FakeWmc
+    mainapp.wmc = _FakeWmc
     fetch_calls = []
     app = _mk_media_app(fetch_calls)
     state.current_play_mode = "local"

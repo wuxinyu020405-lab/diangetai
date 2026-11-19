@@ -2,6 +2,7 @@
 运行时共享状态：跨模块可变的全局，一律以 state.xxx 读写
 """
 
+import os
 
 # ===== v1.2.5：单实例互斥体 + 外部"优雅退出"通道 =====
 # 两个都是 Windows 命名内核对象，**必须与 点歌台.iss 里的
@@ -10,8 +11,15 @@
 #                   安装器靠它判断"点歌台是否还在跑"）
 #   QUIT_EVENT_NAME：外部退出事件（mainapp._start_quit_watcher 监听；安装包覆盖
 #                   升级时置位 → 程序走 quit_app 落盘后自行退出，不做强杀）
-APP_MUTEX_NAME = "Local\\DianGeTai_SingleInstance_v1"
-QUIT_EVENT_NAME = "Local\\DianGeTai_Quit_v1"
+# R-28：测试隔离开关。设环境变量 DIANGETAI_TEST_SUFFIX=_TEST 后，三个命名对象
+# 全部带后缀，与用户正在跑的实例互不干扰（AI/开发测试专用；正常启动不设 = 行为不变）。
+_TEST_SUFFIX = os.environ.get("DIANGETAI_TEST_SUFFIX", "")
+APP_MUTEX_NAME = "Local\\DianGeTai_SingleInstance_v1" + _TEST_SUFFIX
+QUIT_EVENT_NAME = "Local\\DianGeTai_Quit_v1" + _TEST_SUFFIX
+# R-28：外部"唤回窗口"事件（二次启动的实例置位 → 已运行实例自己在 Qt 主线程
+# show 出来）。为什么不能让二次启动的进程直接 ShowWindow：对方的窗口是 Qt 管的
+# 隐藏态，用裸 Win32 强行显示 Qt 不知情、不重绘 → 用户看到的就是白屏卡死。
+SHOW_EVENT_NAME = "Local\\DianGeTai_Show_v1" + _TEST_SUFFIX
 
 
 # ================= 全局状态 =================
@@ -91,6 +99,10 @@ current_play_mode = "local"
 is_local_playing = True    
 
 bgm_paused_by_bot = False
+
+# R-25：本地 BGM（QQ音乐）当前是否暂停。SMTC playback_status==4 才算在播，
+# 其余（暂停/停止）都当暂停，歌词据此隐藏。
+local_bgm_paused = False
 
 active_lrc_lines = []
 

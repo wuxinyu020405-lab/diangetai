@@ -1,5 +1,5 @@
 """
-程序入口（customtkinter 界面）
+程序入口（PySide6 + qfluentwidgets 界面）
 """
 
 import json
@@ -28,7 +28,7 @@ except Exception:
 # 安装包要把已运行的点歌台"体面关掉"，不能靠用户在托盘右键，更不能强杀丢配置。
 # 通道 = 命名事件 state.QUIT_EVENT_NAME：本分支只置位事件，真正退出由已运行
 # 实例自己走 quit_app（落盘 → 停托盘 → 清 node 子进程 → 退出）。
-# 本进程置位后立即退出，且放在所有重导入（ctk / pygame / webview）之前，
+# 本进程置位后立即退出，且放在所有重导入（Qt / pygame / webview）之前，
 # 启动开销只有解释器本身。
 # 注意：这**不改变**"用户点 X 只缩托盘"的既有行为——只有外部显式调用才触发。
 def _signal_running_instance_quit():
@@ -122,8 +122,6 @@ def _setup_dotnet_for_webview():
 
 _setup_dotnet_for_webview()
 
-import customtkinter as ctk
-
 import mainapp
 import musiclib
 import settings
@@ -161,22 +159,88 @@ def _acquire_single_instance():
     return True
 
 
+def _wake_existing_instance():
+    """R-28：二次启动时唤回已运行实例。返回 True=已送达唤醒信号。
+
+    走命名事件 SHOW_EVENT_NAME，让**那个实例自己**在 Qt 主线程里 show 窗口。
+
+    旧做法（v1.2.2 起）是就地 EnumWindows 找标题后 ShowWindow(SW_SHOW)：
+    窗口缩在托盘时是 Qt 的 hide() 状态，别的进程用裸 Win32 强行显示，
+    Qt 不知情、不重绘 → 用户看到的是一块**白屏死窗口**，只能任务管理器强杀
+    （R-28 用户实测反馈）。所以从 R-28 起不再对隐藏窗口强显示。
+    """
+    if os.name != "nt":
+        return False
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.windll.kernel32
+    EVENT_MODIFY_STATE = 0x0002
+    SYNCHRONIZE = 0x00100000
+    kernel32.OpenEventW.restype = wintypes.HANDLE
+    kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+    kernel32.SetEvent.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    h = kernel32.OpenEventW(EVENT_MODIFY_STATE, False, state.SHOW_EVENT_NAME)
+    if not h:
+        return False        # 老版本实例没有唤醒通道
+    try:
+        kernel32.SetEvent(h)
+    finally:
+        kernel32.CloseHandle(h)
+    # 顺带把（若存在的）可见窗口置前，纯粹是"锦上添花"：只在窗口本来就可见时
+    # 才 SetForegroundWindow，绝不对隐藏窗口做 ShowWindow。
+    try:
+        _lift_visible_window_only()
+    except Exception:
+        pass
+    return True
+
+
+def _lift_visible_window_only():
+    """只对**当前可见**的已运行实例窗口置前（不解除隐藏，不会白屏）。"""
+    import ctypes
+    user32 = ctypes.windll.user32
+    target = None
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
+    def _cb(hwnd, _l):
+        nonlocal target
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if buf.value.startswith("点歌台控制台"):
+            target = hwnd
+            return False
+        return True
+
+    user32.EnumWindows(_cb, 0)
+    if target:
+        SW_RESTORE = 9
+        user32.ShowWindow(target, SW_RESTORE)   # 只处理最小化，可见窗口安全
+        user32.SetForegroundWindow(target)
+        return True
+    return False
+
+
 def _bring_existing_window_front():
     """尽力把已运行实例的主窗口置前；找不到就算了，不报错。返回是否找到。
 
-    v1.2.2·托盘（#18 沟通歧义分支）：实例缩进托盘时窗口是 withdraw 隐藏态，
-    旧代码 IsWindowVisible 过滤会直接跳过它 → 二次启动只弹"已在运行"而窗口
-    出不来，用户误判"打不开"。现在不过滤可见性，按标题找到后强制
-    SW_SHOW(解除withdraw) + SW_RESTORE(取消最小化)。"""
+    ⚠️ R-28 起仅作为**老版本实例**（没有 SHOW_EVENT_NAME 唤醒通道）的兜底路径，
+    且只敢对"当前可见"的窗口操作。对隐藏窗口强显示 = 白屏死窗（见上）。
+    """
     try:
         import ctypes
         user32 = ctypes.windll.user32
-        SW_RESTORE, SW_SHOW = 9, 5
+        SW_RESTORE = 9
         target = None
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_ssize_t)
         def _cb(hwnd, _l):
             nonlocal target
+            if not user32.IsWindowVisible(hwnd):
+                return True
             buf = ctypes.create_unicode_buffer(256)
             user32.GetWindowTextW(hwnd, buf, 256)
             if buf.value.startswith("点歌台控制台"):
@@ -186,7 +250,6 @@ def _bring_existing_window_front():
 
         user32.EnumWindows(_cb, 0)
         if target:
-            user32.ShowWindow(target, SW_SHOW)
             user32.ShowWindow(target, SW_RESTORE)
             user32.SetForegroundWindow(target)
             return True
@@ -202,16 +265,23 @@ def _show_already_running():
     from tkinter import messagebox as _mb
     _r = _tk.Tk()
     _r.withdraw()
-    _mb.showinfo("点歌台", "点歌台已经在运行了。\n\n已尝试为你切到它的窗口；\n"
-                           "如果它最小化到了系统托盘，请在任务栏右下角托盘区双击图标。")
+    _mb.showinfo("点歌台", "点歌台已经在运行了。\n\n"
+                           "请在任务栏或屏幕右下角托盘找到它的窗口；\n"
+                           "若找不到（异常残留），请打开任务管理器结束\n"
+                           "「点歌台」后再重新打开。")
     _r.destroy()
 
 
 def launch_main_app(config):
-    # 根窗口必须是 ctk.CTk（普通 tk.Tk 不支持 CTk 的配色参数）
-    root = ctk.CTk()
-    state.app = mainapp.MusicApp(root, config)
-    root.mainloop()
+    # R-15：界面换成 PySide6 + qfluentwidgets（qtapp.py）。
+    # 这里只负责建 Qt 应用并把 MusicApp 挂上去；业务逻辑仍在 mainapp。
+    import qtapp
+
+    def _make(win):
+        state.app = mainapp.MusicApp(win, config)
+        return state.app
+
+    return qtapp.run(config, _make)
 
 
 def run_selftest():
@@ -237,7 +307,7 @@ def run_selftest():
 
     out("── 关键模块导入 ──")
     for m in ("webview", "clr", "pythonnet",
-              "customtkinter", "pygame", "aiohttp", "blivedm",
+              "PySide6.QtWidgets", "qfluentwidgets", "pygame", "aiohttp", "blivedm",
               "qqmusic_api", "winsdk.windows.media.control",
               # v1.2.1：配置加密（漏打包 = 装完直接崩，必须自检拦住）
               "secretstore",
@@ -375,9 +445,17 @@ if __name__ == '__main__':
         config_data = {"room_id": "", "bili_cookie": "", "qqmusic_path": ""}
 
     if not _acquire_single_instance():
-        # v1.2.2·托盘：能唤回已有（含缩在托盘的）窗口就静默退，别再弹"已在运行"框；
-        # 唤不回（老系统/极端情况）才提示用户去托盘找。
-        if not _bring_existing_window_front():
+        # R-28：优先走"唤醒事件"让已运行实例自己把窗口显示出来（Qt 主线程 show，
+        # 不会白屏）。老版本实例没有这个通道时，只对可见窗口置前；窗口藏着又唤不醒
+        # → 明确弹提示告诉用户，而不是把人家隐藏窗口强显成白屏死窗。
+        woke = False
+        try:
+            woke = _wake_existing_instance()
+        except Exception:
+            woke = False
+        if not woke:
+            woke = _bring_existing_window_front()
+        if not woke:
             try:
                 _show_already_running()
             except Exception:

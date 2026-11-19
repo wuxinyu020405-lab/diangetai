@@ -23,8 +23,41 @@ import pystray
 from pystray import MenuItem as Item
 from PIL import Image, ImageDraw
 
+
+def _patch_pystray_filter():
+    """R-26：修「托盘未就绪: PermissionError: [WinError 5] 拒绝访问」。
+
+    根因（本机实测）：pystray 0.19.5 建托盘时对新建的消息窗口调用
+    ChangeWindowMessageFilterEx(hwnd, WM_TASKBARCREATED, MSGFLT_ALLOW, ...)，
+    用来让自己在"提权运行"时也能收到任务栏重建消息。这个调用在不少
+    Windows 环境下会直接失败（返回 0 + WinError 5），而 pystray 把它当致命
+    错误往上抛 → 托盘整个起不来。
+
+    实际上这个滤波只影响"Explorer 崩溃重启后图标能不能自己回来"这种边缘场景；
+    失败也不会影响托盘图标本身的创建与使用（实测：吞掉异常后托盘正常显示、
+    右键菜单正常、退出正常）。
+
+    这里把它换成"失败就当成功"的版本。只影响 pystray 内部这一处，
+    不动用户环境、不动系统设置。
+    """
+    try:
+        import pystray._util.win32 as _pwin
+        _orig = getattr(_pwin, "ChangeWindowMessageFilterEx", None)
+        if _orig is None or getattr(_orig, "_r26_patched", False):
+            return
+        def _safe(hwnd, message, action, pchange):
+            try:
+                return _orig(hwnd, message, action, pchange)
+            except Exception:
+                return True          # 当作成功：滤波失败不阻塞托盘
+        _safe._r26_patched = True
+        _pwin.ChangeWindowMessageFilterEx = _safe
+    except Exception:
+        pass
+
 import state
 import version
+
 
 
 def _load_image():
@@ -56,7 +89,58 @@ class Tray:
         self._thread = None
         self._notified = False
         self._error = None
+        self._added_ok = False   # R-28：Shell_NotifyIcon(NIM_ADD) 实测成功标记
         self._lock = threading.Lock()
+
+    def _ensure_added(self):
+        """R-28：同步执行 Shell_NotifyIcon(NIM_ADD) 并检查返回值。
+        成功返回 True；失败返回 False 并把原因写 self._error。
+
+        为什么必须自己来：
+          - pystray 原版 _show() 跑在 Shell 回调线程里、返回值直接丢弃——
+            NIM_ADD 失败（本机实测返回 0 + WinError 5，UIPI 限制）完全无声；
+          - "setup 回调了 = 托盘可用"的老判定是假的 → 窗口 withdraw、图标没进
+            Shell → "托盘不显示 + 进程残留"的幽灵状态（R-28 用户实测）。
+        NOTIFYICONDATAW 参数与 pystray 原版 _show/_message 一致；注意原版
+        hID= 是个不存在的字段名（真字段 uID），ctypes 静默忽略 → pystray
+        全程 uID=0，这里必须跟它一致用 0，否则它的 NIM_DELETE 删不掉。
+        """
+        import ctypes
+        try:
+            from pystray._util import win32 as _w32
+            icon = self.icon
+            icon._assert_icon_handle()
+            nid = _w32.NOTIFYICONDATAW(
+                cbSize=ctypes.sizeof(_w32.NOTIFYICONDATAW),
+                hWnd=icon._hwnd,
+                uID=0,
+                uFlags=_w32.NIF_MESSAGE | _w32.NIF_ICON | _w32.NIF_TIP,
+                uCallbackMessage=_w32.WM_NOTIFY,
+                hIcon=icon._icon_handle,
+                szTip=icon.title or "")
+            if _w32.Shell_NotifyIcon(_w32.NIM_ADD, nid):
+                icon._visible = True        # 对齐内部态，跳过 setter 防重复 ADD
+                self._added_ok = True
+                return True
+            self._error = "Shell_NotifyIcon(NIM_ADD) 被拒 WinError %s" % ctypes.GetLastError()
+        except Exception as e:
+            self._error = "%s: %s" % (type(e).__name__, e)
+        self._added_ok = False
+        return False
+
+    def _cleanup_failed_icon(self):
+        """NIM_ADD 失败后的回收：给托盘消息窗口发 WM_STOP → pystray 主循环
+        正常收尾（销毁两个窗口、注销窗口类、线程退出）。不留任何托盘线程/
+        窗口（幽灵状态防线之一）。"""
+        icon = self.icon
+        if icon is None:
+            return
+        try:
+            from pystray._util import win32 as _w32
+            if getattr(icon, "_hwnd", None):
+                _w32.PostMessage(icon._hwnd, _w32.WM_STOP, 0, 0)
+        except Exception:
+            pass
 
     # ── 菜单动作：全部编组回 Tk 主线程，只投递意图，不在此线程直接动 Tk ──
     def _show(self, _icon=None, _item=None):
@@ -91,10 +175,13 @@ class Tray:
 
         关键防呆：icon.run() 在后台线程跑，若启动瞬间就抛异常，而窗口已经
         withdraw → 用户被困在"既无窗口也无托盘"状态。这里用 Event 等首帧确认
-        （最多 2 秒）：run 里先置 ok、异常置 error，start 据 error 决定放行/退回。"""
+        （最多 2 秒）：setup 里**实测 NIM_ADD 注册进 Shell 成功**才置 ok；
+        超时/异常/注册被拒都算失败——宁可退回最小化，也绝不 withdraw 后没托盘
+        （R-28：老版本 setup 回调即算成功，注册被无声拒绝时就是幽灵状态）。"""
         with self._lock:
             if self.icon is not None:
                 return True
+            _patch_pystray_filter()      # R-26：先修掉那个必抛 WinError5 的调用
             try:
                 self.icon = self._build()
             except Exception as e:
@@ -104,14 +191,15 @@ class Tray:
             ready = threading.Event()
             self._error = None
             self._ok = False
+            self._added_ok = False
             t = threading.Thread(target=self._run, args=(ready,), daemon=True)
             t.start()
             ready.wait(2.0)
-            # 只有 setup 真正回调（_ok=True）才认定托盘可用；
-            # 超时或异常都算失败——宁可退回最小化，也绝不 withdraw 后没托盘
+            # 只有 setup 真正回调且 NIM_ADD 实测成功（_ok=True）才认定托盘可用
             if not self._ok:
                 self.app.log(f"⚠️ 托盘未就绪" + (f": {self._error}" if self._error else "（超时）")
                              + "（改为最小化窗口）")
+                self._cleanup_failed_icon()
                 self.icon = None
                 return False
             return True
@@ -119,12 +207,20 @@ class Tray:
     def _run(self, ready):
         try:
             def _setup(icon):
-                icon.visible = True
-                self._ok = True          # 确认信号：setup 被回调 = 消息循环真起来了
+                # R-28：不再"回调即成功"。先同步把图标真注册进 Shell 并验返回值，
+                # 失败就地回收，让 start() 走降级。**绝不允许"窗口已藏 + 托盘没
+                # 注册 + 进程还活着"的幽灵状态**——那正是用户看到的
+                # "托盘不显示但进程残留"。
+                if self._ensure_added():
+                    self._ok = True
+                else:
+                    self._cleanup_failed_icon()
                 ready.set()
             self.icon.run(setup=_setup)
         except Exception as e:
-            self._error = f"{type(e).__name__}: {e}"
+            if self._error is None:
+                self._error = f"{type(e).__name__}: {e}"
+            self._cleanup_failed_icon()
             ready.set()
 
     def notify(self, title, text):

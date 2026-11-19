@@ -102,29 +102,34 @@ def main():
     still = run_in_loop(loop, lambda: state.processing_request["song_name"])
     ck("⑥ 正在下载项独立于 pending", still == "下载中", still)
 
-    # ⑦ 渲染冒烟：真 CTk 窗口 + mainapp.MusicApp 全量（需桌面会话）
+    # ⑦ 渲染冒烟：真 Qt 窗口 + mainapp.MusicApp 全量（需桌面会话）
+    # R-22：原先用 customtkinter 建窗口，UI 换 PySide6 后改成 qtapp（窗口不上屏）。
     rendered = None
     try:
-        import customtkinter as ctk
-        root = ctk.CTk()
-        root.withdraw()
-        import ui_ctk
+        import qtapp
+        qapp = qtapp.make_app()
+        win = qtapp.MainWindow()
         app3 = mainapp.MusicApp.__new__(mainapp.MusicApp)
-        app3.root = root; app3.config = dict(state.style_config and {} or {})
-        app3.loop = loop; app3.logs = []
+        app3.root = win
+        app3.config = {"room_id": "", "ui_theme": "light"}
+        app3.loop = loop
+        app3.logs = []
         app3._qm_built = False
-        ui_ctk.build(app3, root)
+        app3.get_volume = lambda: 0.8
+        app3.set_volume = lambda v: None
+        app3.log = lambda m: None
+        app3.schedule_save_style = lambda: None
+        qtapp.build(app3, win)
         app3.refresh_queue_mgmt()
-        rendered = (hasattr(app3, "qm_pending_box")
-                    and len(app3.qm_pending_box.winfo_children()) >= 2
-                    and len(app3.qm_ready_box.winfo_children()) >= 2)
-        root.destroy()
+        rendered = (app3.qm_pending_layout.count() >= 2
+                    and app3.qm_ready_layout.count() >= 2)
+        win.deleteLater()
     except Exception as e:
         rendered = f"skip: {type(e).__name__}: {e}"
     if isinstance(rendered, str):
         print("  ⚪ ⑦ 渲染冒烟：环境不支持真窗口，跳过（逻辑层已覆盖核心）")
     else:
-        ck("⑦ CTk 渲染出两列条目", rendered)
+        ck("⑦ Qt 渲染出两列条目", rendered)
 
     bad = [n for n, ok in RES if not ok]
     print(f"\n{'✅' if not bad else '❌'} _test_queue_mgmt: {len(RES)-len(bad)}/{len(RES)}")

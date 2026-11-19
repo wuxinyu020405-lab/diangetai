@@ -41,7 +41,7 @@ _LEGACY_DIRS = ("_update_staging", "_update_dl")
 _LEGACY_FILES = ("_update_pending.json", "_update_status.json", "_update_notified.json")
 
 _checking = {"v": False}          # 同一时刻只跑一次检查（后台 + 手动撞车防重复）
-_link = {"app": None}             # 已挂接的界面（ui_ctk 建完控件后登记）
+_link = {"app": None}             # 已挂接的界面（界面层建完控件后登记）
 
 # 本次检查到的新版本信息（按钮点下去就用它）
 _latest = {"tag": None, "release_url": "", "setup_url": "", "direct": False}
@@ -162,7 +162,7 @@ def open_setup_download(app=None):
 # ════════════════ 界面上的「⬆ 下载」按钮（同一个位置替换「检查更新」）════════════════
 
 def register_update_link(app):
-    """ui_ctk 建好按钮后调用。若检查结果先到，这里立刻补一次显示。"""
+    """界面层建好按钮后调用。若检查结果先到，这里立刻补一次显示。"""
     _link["app"] = app
     if _latest.get("tag") and version.is_newer(_latest["tag"], version.VERSION):
         _show_link(app, _latest["tag"])

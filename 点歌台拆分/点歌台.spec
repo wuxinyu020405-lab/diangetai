@@ -7,7 +7,7 @@
 产物：dist\\点歌台\\点歌台.exe + 同目录依赖（onedir，启动快、易排错）
 注意：exe 必须连同整个 dist\\点歌台\\ 目录一起分发，不能只拖 exe。
 """
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all
 
 import glob
 import os
@@ -78,10 +78,9 @@ else:
 
 # ── 需要完整收集的包 ──────────────────────────────────────────────
 # qqmusic_api: 大量动态导入（algorithms/models/modules）+ 可能带数据文件
-# customtkinter: 必须带 assets（字体/主题 JSON），否则界面起不来
 # blivedm: GitHub master 安装，clients/models 子包靠运行时导入
 # winsdk: namespace 包，PyInstaller 静态分析抓不到，必须 collect_all
-for pkg in ("qqmusic_api", "customtkinter", "blivedm", "winsdk"):
+for pkg in ("qqmusic_api", "blivedm", "winsdk"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -91,6 +90,14 @@ for pkg in ("qqmusic_api", "customtkinter", "blivedm", "winsdk"):
         print(f"[spec][WARN] collect_all({pkg}) 失败: {e}")
 
 # selenium: 已不再使用（登录改为 pywebview 内嵌浏览器），故不收集。
+
+# ── Qt 界面（R-15 起 UI 是 PySide6 + qfluentwidgets；R-22 清掉 customtkinter）──
+# PySide6 由 PyInstaller 自带官方 hook 处理；qfluentwidgets / qframelesswindow
+# 的图标资源是打进 _rc/resource.py 的（包内没有任何数据文件，实测 0 个），
+# 所以**不需要** collect_all / collect_data_files，静态分析就够。
+# ⚠️ 反面教训（R-22 实测）：collect_all("qfluentwidgets") 会把 multimedia 等
+#    用不到的子模块全拖进来，连带 require QtMultimedia；不排除 Qt 大模块时
+#    PySide6 整包进 dist（Qt6WebEngineCore.dll 一个 203MB），包体从 299MB 涨到 877MB。
 
 # ── pywebview（内嵌浏览器登录）──────────────────────────────────
 # 关键：
@@ -186,16 +193,20 @@ hiddenimports += [
 # ── 项目自身模块（拆分包之间互相 import）─────────────────────────
 hiddenimports += [
     "state", "settings", "lyrics", "musiclib", "overlay",
-    "smtc", "browserlogin", "danmaku", "mainapp", "ui_ctk",
+    "smtc", "browserlogin", "danmaku", "mainapp",
+    # R-15：界面换成 PySide6（qtapp.py + qtshim.py），旧的 ui_ctk.py 已删除（R-22）
+    "qtapp", "qtshim",
     "version", "updater",
     # v1.2.1：配置加密 + 自动更新（main.py 的 if 分支里 import，静态能抓到，
     # 但按项目惯例显式列出双保险）
     "secretstore",
     # v1.2.2：系统托盘（mainapp 方法内 import tray；tray 内 import pystray/PIL）
     "tray", "pystray", "pystray._win32", "PIL", "PIL._tkinter_finder",
+    # R-28：子进程登记簿（quit_app 内 import，静态分析抓不到）
+    "childproc",
     # v1.2.8：本地曲库（danmaku/mainapp 都 import，显式列出双保险）
     "locallib",
-    # v1.2.8：字体候选与校验（ui_ctk 顶部 import，显式列出双保险）
+    # v1.2.8：字体候选与校验（qtapp / qtshim 顶部 import，显式列出双保险）
     "fontlib",
     # 抖音 provider 是函数内 import（main_async 里），静态分析抓不到，必须显式列，
     # 否则打包版启用抖音直接 ModuleNotFoundError
@@ -203,8 +214,6 @@ hiddenimports += [
 ]
 
 # ── 运行期需要的非代码文件 ────────────────────────────────────────
-# customtkinter 资源双保险
-datas += collect_data_files("customtkinter")
 
 a = Analysis(
     ["main.py"],                 # 入口（相对 spec 所在目录，即 点歌台拆分/）
@@ -218,11 +227,83 @@ a = Analysis(
     excludes=[
         # 明显用不到的大包，减小体积
         "matplotlib", "numpy", "scipy", "pandas", "PyQt5", "PyQt6",
-        "PySide2", "PySide6", "IPython", "jupyter", "pytest",
+        "PySide2", "IPython", "jupyter", "pytest",
+        # R-22：Qt 只用 Core/Gui/Widgets（外加 Svg/Xml），其余模块一律不收。
+        # 不排除的话 Qt6WebEngineCore.dll(203MB) + WebEngine 资源(75MB) +
+        # opengl32sw.dll(20MB) 全会被带进来。
+        "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel",
+        "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D",
+        "PySide6.QtQuickWidgets", "PySide6.QtQuickControls2",
+        "PySide6.QtPdf", "PySide6.QtPdfWidgets",
+        "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets",
+        "PySide6.QtSpatialAudio",
+        "PySide6.QtCharts", "PySide6.QtDataVisualization", "PySide6.QtGraphs",
+        "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.Qt3DInput",
+        "PySide6.Qt3DLogic", "PySide6.Qt3DAnimation", "PySide6.Qt3DExtras",
+        "PySide6.QtBluetooth", "PySide6.QtNfc", "PySide6.QtPositioning",
+        "PySide6.QtLocation", "PySide6.QtSensors", "PySide6.QtSerialPort",
+        "PySide6.QtSerialBus", "PySide6.QtSql", "PySide6.QtTest",
+        "PySide6.QtHelp", "PySide6.QtDesigner", "PySide6.QtUiTools",
+        "PySide6.QtRemoteObjects", "PySide6.QtScxml", "PySide6.QtStateMachine",
     ],
     noarchive=False,
     optimize=0,
 )
+# ══════════════════════════════════════════════════════════════════
+# R-24 瘦身：在 Analysis 之后、COLLECT 之前，把用不到的 Qt 二进制/翻译剔掉。
+# 依据（逐项实测，不是拍脑袋）：
+#  · opengl32sw.dll(20MB)  = Qt 的软件 OpenGL 兜底实现。本程序 UI 是 Qt Widgets
+#    的 raster 引擎，从不创建 QOpenGLContext；去掉后起窗口 5 页全切、深浅色切换、
+#    OBS 服务、自检全部正常（R-24 实测）。
+#  · Qt6Qml*/Qt6Quick/Qt6VirtualKeyboard = QML 运行时。全项目 grep 无任何
+#    Qml/Quick import，qfluentwidgets/qframelesswindow 也不用；引它们的只有
+#    qdirect2d 插件和虚拟键盘插件，一起剔。
+#  · Qt6Pdf.dll + imageformats/qpdf.dll = 只在把 PDF 当图片加载时用，程序不做。
+#  · Qt6OpenGL.dll = 只被 Qt6Quick 链接，Quick 走了它就没人要。
+#  · translations 只留 简体/繁体中文 + 英文；Qt 默认语言就是英文，界面文案全在
+#    我们自己代码里，翻译文件只影响 Qt 内置控件（右键菜单等）的措辞。
+#  · qminimal/qoffscreen 平台插件体积很小(174KB)，是测试/无头环境兜底，保留。
+# ⚠️ 保守项（拿不准，不动）：Qt6Network（TLS/网络插件依赖）、Qt6Svg/Xml、
+#    imageformats 其余编解码器、qwindows、styles。
+# ══════════════════════════════════════════════════════════════════
+_DROP_BINARIES = {
+    "opengl32sw.dll",
+    "Qt6Qml.dll", "Qt6QmlMeta.dll", "Qt6QmlModels.dll", "Qt6QmlWorkerScript.dll",
+    "Qt6Quick.dll", "Qt6VirtualKeyboard.dll", "Qt6Pdf.dll", "Qt6OpenGL.dll",
+    "qdirect2d.dll", "qpdf.dll",
+    "qtvirtualkeyboardplugin.dll", "qtuiotouchplugin.dll",
+}
+_KEEP_TRANSLATIONS = {
+    "qt_zh_CN.qm", "qt_zh_TW.qm", "qt_en.qm",
+    "qtbase_zh_CN.qm", "qtbase_zh_TW.qm", "qtbase_en.qm",
+}
+
+
+def _is_dropped_binary(dest):
+    """dest 形如 'PySide6/Qt6Qml.dll' 或 'PySide6/plugins/imageformats/qpdf.dll'。"""
+    name = os.path.basename(dest)
+    if name in _DROP_BINARIES:
+        return True
+    # 翻译目录只保留中英文
+    if "/translations/" in dest.replace("\\", "/") and name.endswith(".qm"):
+        return name not in _KEEP_TRANSLATIONS
+    return False
+
+
+def _is_dropped_data(dest):
+    # 翻译文件有时被 PyInstaller 归到 datas 而不是 binaries，两边都过一遍
+    return _is_dropped_binary(dest)
+
+
+for _field in ("binaries", "datas"):
+    _before = getattr(a, _field)
+    _after = [x for x in _before if not _is_dropped_binary(x[0])]
+    setattr(a, _field, _after)
+    _n = len(_before) - len(_after)
+    if _n:
+        print(f"[spec][瘦身] {_field}: 剔除 {_n} 项")
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
