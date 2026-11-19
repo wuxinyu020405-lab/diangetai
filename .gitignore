@@ -99,3 +99,10 @@ _update_status.json
 # v1.2.8：自己录的歌是用户数据，绝不入库（含可能的隐私录音）
 my_songs/
 点歌台拆分/my_songs/
+
+# B站扫码登录导出的 Cookie（真实凭据，绝不入库）
+bilibili_cookies.json
+
+# AI 工具会话/记忆临时目录（与项目无关）
+.cross-session/
+.mnemon/

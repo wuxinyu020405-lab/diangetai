@@ -24,15 +24,6 @@ try:
 except Exception:
     pass
 
-# ── v1.2.3：--__upd__ exe-worker 机制已拆除 ────────────────────────
-# v1.2.1/1.2.2 用 点歌台.exe 自己当更新器 worker，它运行时从 _internal
-# 加载自身 DLL → 自己锁自己 → 换名 WinError 5 → 永远更新不上（真机实录）。
-# v1.2.3 改为外部 powershell 进程执行替换（updater.spawn_ps_worker），
-# exe 不再承担 worker 角色。此分支仅为兼容极旧流程的无害兜底，直接退出。
-if any(str(a).startswith("--__upd") for a in sys.argv):
-    sys.exit(0)
-
-
 # ── v1.2.5：`--quit` 外部优雅退出通道（覆盖升级用）──────────────────
 # 安装包要把已运行的点歌台"体面关掉"，不能靠用户在托盘右键，更不能强杀丢配置。
 # 通道 = 命名事件 state.QUIT_EVENT_NAME：本分支只置位事件，真正退出由已运行
@@ -248,7 +239,7 @@ def run_selftest():
     for m in ("webview", "clr", "pythonnet",
               "customtkinter", "pygame", "aiohttp", "blivedm",
               "qqmusic_api", "winsdk.windows.media.control",
-              # v1.2.1：加密与自动更新（漏打包 = 装完直接崩，必须自检拦住）
+              # v1.2.1：配置加密（漏打包 = 装完直接崩，必须自检拦住）
               "secretstore",
               # v1.2.2：系统托盘（漏装 = 点X直接崩，同样自检拦住）
               "tray", "pystray", "pystray._win32", "PIL", "PIL.Image", "PIL._tkinter_finder"):
@@ -393,38 +384,7 @@ if __name__ == '__main__':
                 pass   # 无桌面会话等极端情况：静默退出即可
         sys.exit(0)
 
-    # v1.2.3·续跑分支：上次用户选了"稍后更新"，marker 还在 →
-    # 本次启动让位：拉起外部 ps1 更新器后立刻退出，ps1 换完文件会重启新版。
-    try:
-        _upd_marker = os.path.join(settings.BASE_DIR, "_update_pending.json")
-        if os.path.exists(_upd_marker):
-            import updater as _upd
-            if _upd.resume_pending_update(_upd_marker):
-                print("[INFO] 检测到待完成的更新，本次启动让位给更新器")
-                sys.exit(0)
-            print("[INFO] 待更新标记已失效（暂存被清理），照常启动并重新检查")
-    except SystemExit:
-        raise
-    except Exception as _e:
-        print(f"[WARN] 更新续跑检查异常（照常启动主程序）: {_e}")
-
-    # v1.2.3：把上次更新的结局告诉用户（v1.2.1 失败只写日志、日志还被覆盖，
-    # 用户只看到"重开还是旧版"却不知为何）。只提示失败，成功不打扰。
-    try:
-        import updater as _upd2
-        _last = _upd2.read_last_update_result()
-        if _last and _last.get("status") in ("rolled_back", "stalled", "dropped"):
-            _msg = _last.get("message") or "上次更新未完成"
-            print(f"[INFO] 上次更新结局: {_last.get('status')} - {_msg}")
-            try:
-                import tkinter as _tk
-                from tkinter import messagebox as _mb
-                _r = _tk.Tk(); _r.withdraw()
-                _mb.showwarning("点歌台 更新", _msg)
-                _r.destroy()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
+    # v1.2.9.3：旧版"程序自己下载并替换自己"的续跑分支已整段拆除——
+    # 现在点「⬆ 下载」由默认浏览器下 Setup 安装包，装包交给安装程序；
+    # 启动时不再有 marker 让位、上次结局弹窗这类残留逻辑。
     launch_main_app(config_data)

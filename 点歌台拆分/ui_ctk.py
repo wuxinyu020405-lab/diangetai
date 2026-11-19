@@ -113,14 +113,26 @@ def build(app, root):
     src_bar = ctk.CTkFrame(top, fg_color="transparent")
     src_bar.pack(side="right", padx=12)
 
-    # ── 版本 + 检查更新（pack 顺序在 src_bar 之后 → 显示在其左侧）──
+    # ── 版本 + 更新入口（pack 顺序在 src_bar 之后 → 显示在其左侧）──
+    # v1.2.9.3：程序自己下载/安装的口子已拆除。查到新版时，此处把「检查更新」换成
+    # 「⬆ 下载 vX」——点一下用系统默认浏览器打开 Setup 直链，浏览器直接开始下载。
+    # 两个按钮共用同一个位置：平时显示「检查更新」，有新版才换成下载按钮（顶栏不变宽）。
     upd_bar = ctk.CTkFrame(top, fg_color="transparent")
     upd_bar.pack(side="right")
     ctk.CTkLabel(upd_bar, text=version.DISPLAY, font=_font(11), text_color=MUTED).pack(side="left", padx=(0, 6))
-    ctk.CTkButton(upd_bar, text="检查更新", width=64, height=26, corner_radius=8,
-                  fg_color=("white", "#334155"), hover_color=ACCENT, font=_font(11),
-                  text_color=("#334155", "white"),
-                  command=lambda: updater.manual_check(app)).pack(side="left")
+    app.btn_check_update = ctk.CTkButton(
+        upd_bar, text="检查更新", width=64, height=26, corner_radius=8,
+        fg_color=("white", "#334155"), hover_color=ACCENT, font=_font(11),
+        text_color=("#334155", "white"),
+        command=lambda: updater.manual_check(app))
+    app.btn_check_update.pack(side="left")
+    # 下载按钮先建好但不 pack：只有查到新版才由 updater.register_update_link 换上来
+    app.btn_update_link = ctk.CTkButton(
+        upd_bar, text="", width=104, height=26, corner_radius=8,
+        fg_color=ACCENT, hover_color=("#1D4ED8", "#2563EB"), font=_font(11, True),
+        text_color="white",
+        command=lambda: updater.open_setup_download(app))
+    updater.register_update_link(app)
 
     # ── v1.1·N1 暂停/继续按钮（pack 在 upd_bar 之后 → 显示其左侧）──
     pause_bar = ctk.CTkFrame(top, fg_color="transparent")
