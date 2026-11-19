@@ -8,6 +8,7 @@ import pygame
 import secretstore
 import settings
 import state
+from qqmusic_api import Client  # 凭证续期 try_refresh_credential 用（H1 修复）
 import ply                     # 原 L1：qqmusic_api→jsonpath_ng→ply 传递依赖
 import jsonpath_ng             # 原 L2：同上
 import jsonpath_ng.ext         # 原 L3：同上
@@ -414,7 +415,8 @@ async def try_refresh_credential(credential):
             if inspect.isawaitable(res):
                 res = await res
             return res
-    except Exception:
+    except Exception as e:
+        print(f"[WARN] 凭证续期失败: {type(e).__name__}: {e}")
         return None
 
 

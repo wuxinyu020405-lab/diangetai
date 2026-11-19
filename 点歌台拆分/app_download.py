@@ -25,6 +25,20 @@ class BudgetExceeded(Exception):
 _BudgetExceeded = BudgetExceeded
 
 
+def _build_download_headers(credential):
+    """按给定凭证构造流式下载用的请求头（CDN 只认 Cookie 里的 uin/musickey）。
+
+    M2：凭证续期成功后 state.qq_credential 会被整个替换。若沿用续期前
+    构造好的 headers，就会出现「取址用新凭证成功、下载仍带旧 musickey 被
+    403」。所以凭证一变，这份头就必须用新凭证重新构造。
+    """
+    return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://y.qq.com/", "Origin": "https://y.qq.com",
+        "Cookie": f"uin=o{credential.musicid}; qm_keyst={credential.musickey};",
+    }
+
+
 class DownloadMixin:
     """R-23：从 mainapp.MusicApp 拆出的方法块，靠多重继承合回同一个类。"""
 
@@ -86,11 +100,8 @@ class DownloadMixin:
         if cdn:
             print(f"[INFO] 已获取CDN分发节点: {cdn}")
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://y.qq.com/", "Origin": "https://y.qq.com",
-            "Cookie": f"uin=o{state.qq_credential.musicid}; qm_keyst={state.qq_credential.musickey};"
-        }
+        # 下载请求头按当前凭证构造；续期后必须重建（见下面两处重建点）
+        headers = _build_download_headers(state.qq_credential)
 
         for idx, (tier_key, tier_label, enum_names, default_ext, needs_enum) in enumerate(chain):
             # 第7步：单首预算——档位级检查，超时立即放弃整首（不再逐档烧时间）
@@ -157,6 +168,9 @@ class DownloadMixin:
                                 if new_cred:
                                     state.qq_credential = new_cred
                                     settings.save_credential(new_cred)
+                                    # M2：凭证换新了，下载请求头必须同步重建——
+                                    # 否则重试时取址用新 key、下载仍带旧 musickey → 403
+                                    headers = _build_download_headers(state.qq_credential)
                                     self.log(f"[{tier_label}] VKey获取失败({why})，凭证已自动续期，重试本档")
                                     continue
                                 self.log(f"[{tier_label}] VKey获取失败({why})，且凭证续期失败，跳档")
@@ -229,6 +243,8 @@ class DownloadMixin:
                         if new_cred:
                             state.qq_credential = new_cred
                             settings.save_credential(new_cred)
+                            # M2：同上——续期后重建下载请求头
+                            headers = _build_download_headers(state.qq_credential)
                             self.log(f"[{tier_label}] {reason}，已自动续期凭证并重试本档")
                             continue
                         self.log(f"[{tier_label}] {reason}，且自动续期失败，请重新扫码登录 QQ音乐；跳过此档位")

@@ -13,7 +13,7 @@ import sys
 import traceback
 
 from PySide6.QtCore import Qt, QObject, QTimer, QMetaObject, Slot
-from PySide6.QtGui import QIcon, QFont, QColor
+from PySide6.QtGui import QIcon, QFont, QColor, QTextCursor
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                                QGridLayout, QLabel, QSizePolicy, QFrame)
 
@@ -37,24 +37,78 @@ import updater
 
 # ════════════════ 控件适配器（给 mainapp 用的老接口）════════════════
 
+def _log_warn(what, exc):
+    """日志自身出问题时带类型打一行到控制台，绝不静默吞（L-46）。"""
+    try:
+        print(f"[WARN] {what}: {type(exc).__name__}: {exc}")
+    except Exception:
+        pass
+
+
 class LogAdapter:
-    """日志框：mainapp 里调 log_text.insert(tk.END, ...) / .see(tk.END)。"""
+    """日志框：mainapp 里调 log_text.insert(tk.END, ...) / .see(tk.END)。
+
+    R-29：原来日志无限往里堆，条目一多就把界面挤满、新行也看不见。现在：
+      · 限长 MAX_BLOCKS 行（setMaximumBlockCount，超出自动从顶部裁掉旧行）
+      · 自动滚到底改用「光标移文末 + ensureCursorVisible」——原来的
+        setValue(bar.maximum()) 可能在 append 后拿到布局前的旧 maximum，跟不住新行
+      · 粘性滚动：用户手动往上翻读旧日志时不把他拽回底部；翻回底部后自动恢复跟随
+    """
+
+    MAX_BLOCKS = 300        # 日志框最多保留的行数（旧行从顶部自动裁掉）
+    BOTTOM_EPS = 8          # 距底部 8px 内都算「正在看最新」
 
     def __init__(self, widget):
         self.w = widget
-
-    def insert(self, _index, text):
+        self._follow = True   # 下一条日志是否要自动滚到底（insert 时按用户位置重算）
         try:
-            self.w.appendPlainText(str(text).rstrip())
-        except Exception:
-            pass
+            self.w.setMaximumBlockCount(self.MAX_BLOCKS)
+        except Exception as e:
+            _log_warn("日志框限长设置失败（日志仍可显示，只是不会自动裁旧）", e)
 
-    def see(self, _index):
+    def _at_bottom(self):
+        """当前是否停在底部附近。读不到就按「跟随」处理，宁可滚也不能看不到新日志。"""
         try:
             bar = self.w.verticalScrollBar()
-            bar.setValue(bar.maximum())
-        except Exception:
-            pass
+            return bar.value() >= bar.maximum() - self.BOTTOM_EPS
+        except Exception as e:
+            _log_warn("读取日志滚动位置失败", e)
+            return True
+
+    def _apply_end_scroll(self):
+        """把光标移到文末并确保可见（同步可靠，不依赖滚动条 maximum 的时机）。"""
+        try:
+            cur = self.w.textCursor()
+            cur.movePosition(QTextCursor.MoveOperation.End)
+            self.w.setTextCursor(cur)
+            self.w.ensureCursorVisible()
+        except Exception as e:
+            _log_warn("日志滚动到底失败", e)
+
+    def _scroll_to_end(self):
+        self._apply_end_scroll()
+        # 兜底：append 后布局可能还没算完，下一轮事件循环再滚一次（0ms 延迟）
+        try:
+            QTimer.singleShot(0, self._apply_end_scroll)
+        except Exception as e:
+            _log_warn("日志滚动兜底调度失败", e)
+
+    def insert(self, _index, text):
+        # 先记下「用户此刻是不是在看最新」，再写日志——写完才判断就晚了
+        self._follow = self._at_bottom()
+        try:
+            self.w.appendPlainText(str(text).rstrip())
+        except Exception as e:
+            _log_warn("日志写入失败", e)
+            return
+        if self._follow:
+            self._scroll_to_end()
+
+    def see(self, _index):
+        # mainapp.log 是「先 insert 再 see」；这里沿用 insert 刚做出的跟随判断，
+        # 否则无条件滚一次会把用户的粘性滚动打回底部。
+        if self._follow:
+            self._scroll_to_end()
 
     def configure(self, **_kw):
         return self
