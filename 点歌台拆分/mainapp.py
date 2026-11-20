@@ -62,6 +62,7 @@ class MusicApp(app_download.DownloadMixin, app_player.PlayerMixin,
         self._start_quit_watcher()   # v1.2.5：给安装包留一条"优雅退出"通道
         self._start_show_watcher()   # R-28：给二次启动留一条"合法唤窗"通道
         self.setup_ui()
+        self._check_own_dir_writable()   # R-30：目录写不了时提示（只提示不拦截）
         # v1.2.2·需求21：点 X = 缩到托盘（拍板方案 a）；真退出只走托盘菜单
         try:
             self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
@@ -248,6 +249,31 @@ class MusicApp(app_download.DownloadMixin, app_player.PlayerMixin,
         except Exception:
             pass
 
+    # ═════════ R-30：自身目录可用性自检（只提示，不拦截）═════════════
+    def _check_own_dir_writable(self):
+        """启动时探一下「程序自己所在目录」能不能写/删。
+
+        R-30：沙箱工作区那类目录可能带受限 ACL（能建文件但删不掉），表现为
+        「配置存不下来」。这里只做一次轻量探测 + 在运行日志提示一句，
+        绝不因为探测失败就拦启动。返回 True=可读写，False=受限，None=探测本身出错。
+        """
+        probe = os.path.join(settings.BASE_DIR, ".__dg_write_probe__.tmp")
+        try:
+            try:
+                with open(probe, "w", encoding="utf-8") as f:
+                    f.write("ok")
+            finally:
+                try:
+                    os.remove(probe)
+                except OSError:
+                    # 残留无所谓：下次启动还会再探一次
+                    pass
+            return True
+        except Exception as e:
+            self.log(f"⚠️ 当前目录权限受限（{type(e).__name__}: {e}）：配置/缓存可能存不下来。"
+                     f"建议把程序放到桌面或安装目录再运行（当前：{settings.BASE_DIR}）")
+            return False
+
     # ═════════ 系统托盘（v1.2.2 需求21）═════════════════════════════
     def minimize_to_tray(self):
         """点 X / 托盘"隐藏"时调用：缩进托盘，程序继续跑。
@@ -274,13 +300,23 @@ class MusicApp(app_download.DownloadMixin, app_player.PlayerMixin,
                 self.log(f"⚠️ 托盘模块不可用: {e}（本次改为最小化）")
                 self._tray = False
         if self._tray is False:
-            self._fallback_minimize()
-            return
-        if not self._tray.start():
+            return self._fallback_minimize()
+        # R-30：start() 本身也可能抛（不只返回 False）。抛出去会让 closeEvent
+        # 的整段回调失败 → 点 X 完全没反应。这里一律降级处理，绝不让异常上抛。
+        try:
+            started = self._tray.start()
+        except Exception as e:
+            self.log(f"⚠️ 托盘启动异常: {type(e).__name__}: {e}（改为最小化窗口）")
+            started = False
+        if not started:
             self._tray = False
-            self._fallback_minimize()
-            return
-        self.root.withdraw()                       # 藏起窗口但进程活着
+            return self._fallback_minimize()
+        try:
+            self.root.withdraw()                   # 藏起窗口但进程活着
+        except Exception as e:
+            self.log(f"⚠️ 隐藏窗口失败: {type(e).__name__}: {e}（改为最小化窗口）")
+            return self._fallback_minimize()
+        return True
 
     def _fallback_minimize(self):
         """托盘不可用时的降级出口。R-26：降级也必须能用，绝不让用户只能强杀。
@@ -296,6 +332,26 @@ class MusicApp(app_download.DownloadMixin, app_player.PlayerMixin,
                 self.root.withdraw()
             except Exception:
                 pass
+        # R-30：qtapp 的 iconify/withdraw 内部都是 `except: pass`，可能"什么都没发生"。
+        # 这里实测窗口状态；还明摆着在屏幕上就再隐藏一次，仍不行就明说，
+        # 免得用户点了 X 看着窗口不动、也不知道为什么。
+        ok = True
+        try:
+            st = self.root.state() if hasattr(self.root, "state") else None
+            if st == "normal":
+                try:
+                    self.root.withdraw()
+                except Exception as e:
+                    self.log(f"⚠️ 隐藏窗口失败: {type(e).__name__}: {e}")
+                st = self.root.state() if hasattr(self.root, "state") else None
+                if st == "normal":
+                    self.log("❌ 无法隐藏窗口（当前目录/环境受限）。点 X 无效时请用任务管理器结束，"
+                             "或把程序放到桌面、安装目录再运行。")
+                    ok = False
+        except Exception as e:
+            self.log(f"⚠️ 检查窗口状态失败: {type(e).__name__}: {e}")
+            ok = False      # 状态都查不了 = 无法确认缩进去了，交给上层兜底退出
+        return ok
 
     def show_from_tray(self):
         """托盘"显示主界面" / 双击图标：从托盘唤回窗口。"""
