@@ -360,33 +360,10 @@ class MainWindow(FluentWindow):
 
     def closeEvent(self, event):
         if self._close_cb is not None:
-            ok = False
             try:
-                # 回调返回 False = 明说"这次没处理成"（托盘/隐藏都没成功）
-                ok = self._close_cb() is not False
+                self._close_cb()
             except Exception:
                 traceback.print_exc()
-                ok = False
-            if not ok:
-                # R-30：绝不能让用户困在"点 X 完全没反应"。
-                # 缩托盘/最小化都失败时，改为直接走真退出（quit_app 内部 os._exit，
-                # 一定能退），并先在运行日志留一行可排查的说明。
-                app = getattr(self, "music_app", None)
-                try:
-                    if app is not None:
-                        app.log("⚠️ 关闭处理失败（托盘/最小化均不可用），已改为直接退出")
-                except Exception:
-                    pass
-                try:
-                    if app is not None:
-                        app.quit_app()
-                        return
-                except Exception:
-                    traceback.print_exc()
-                try:
-                    self.hide()      # 最后兜底：至少别把窗口留在屏幕上
-                except Exception:
-                    pass
             event.ignore()
             return
         event.accept()
